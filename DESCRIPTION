@@ -1,0 +1,9 @@
+Package: SCCTempConverter
+Type: Package
+Title: Temperature Conversion Package for Demonstration
+Version: 0.0.1.0
+Encoding: UTF-8
+Author: Tyler L. McIntosh
+Maintainer: tyler.l.mcintosh@colorado.edu
+Description: A collection of personal utility scripts for environmental data science
+RoxygenNote: 7.3.2
