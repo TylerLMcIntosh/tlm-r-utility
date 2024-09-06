@@ -7,3 +7,9 @@ Author: Tyler L. McIntosh
 Maintainer: Tyler McIntosh <tyler.l.mcintosh@colorado.edu>
 Description: A collection of personal utility scripts for environmental data science
 RoxygenNote: 7.3.2
+Imports:  
+    magick,
+    pdftools,
+    webshot2,
+    kableExtra,
+    tools

@@ -2,3 +2,10 @@
 
 export(C_to_F)
 export(F_to_C)
+export(col2hex)
+export(convert.pdf.to.png)
+export(convert.to.cmyk)
+export(dir.ensure)
+export(save_kable_workaround)
+export(substrRight)
+export(timestamp)
