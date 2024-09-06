@@ -1,4 +1,4 @@
-Package: SCCTempConverter
+Package: tlmR
 Type: Package
 Title: Temperature Conversion Package for Demonstration
 Version: 0.0.1.0
