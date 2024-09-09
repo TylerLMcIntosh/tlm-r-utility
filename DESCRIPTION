@@ -1,7 +1,7 @@
 Package: tlmR
 Type: Package
 Title: Temperature Conversion Package for Demonstration
-Version: 0.0.0.2
+Version: 0.0.0.3
 Encoding: UTF-8
 Author: Tyler L. McIntosh
 Maintainer: Tyler McIntosh <tyler.l.mcintosh@colorado.edu>
@@ -18,4 +18,6 @@ Imports:
     terra,
     here,
     glue,
-    httr
+    httr,
+    future,
+    future.apply

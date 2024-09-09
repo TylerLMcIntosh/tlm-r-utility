@@ -4,12 +4,12 @@
 \alias{save_kable_workaround}
 \title{Save Kable Output as PNG with Workaround}
 \usage{
-save_kable_workaround(k, filePath)
+save_kable_workaround(k, file_path)
 }
 \arguments{
 \item{k}{An output object from the `kable` function.}
 
-\item{filePath}{A character string specifying the full desired file path (e.g., 'myDir/figs/myTable.png') for the output PNG file.}
+\item{file_path}{A character string specifying the full desired file path (e.g., 'myDir/figs/myTable.png') for the output PNG file.}
 }
 \value{
 No return value. The function saves the PNG file to the specified location.

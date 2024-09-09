@@ -21,12 +21,15 @@ timestamp <- function(){
 #' @return The function does not return any value. It creates a directory if it does not already exist.
 #' @examples
 #' # Ensure a directory named "data" exists
-#' dir.ensure("data")
+#' dir_ensure("data")
 #'
 #' @export
-dir.ensure <- function(path) {
-  if (!dir.exists(path)){
+dir_ensure <- function(path) {
+  if (!dir.exists(path)) {
     dir.create(path)
+    message("Directory created: ", path)
+  } else {
+    message("Directory already exists: ", path)
   }
 }
 
@@ -39,13 +42,16 @@ dir.ensure <- function(path) {
 #' @return A character string containing the rightmost \code{n} characters of the input string.
 #' @examples
 #' # Extract the last 3 characters from a string
-#' substrRight("Hello, World!", 3)
+#' substr_right("Hello, World!", 3)
 #'
 #' @export
-substrRight <- function(str, n) {
-  return(substr(str, nchar(str)-n+1, nchar(str)))
+substr_right <- function(str, n) {
+  if (n > nchar(str)) {
+    warning("n is greater than the length of the string. Returning the full string.")
+    return(str)
+  }
+  return(substr(str, nchar(str) - n + 1, nchar(str)))
 }
-
 
 #' Convert R Color to Hexadecimal
 #'
@@ -74,7 +80,7 @@ col2hex <- function(color) {
 #' This function provides a workaround for an issue (as of 3/20/24) with `kableExtra::save_kable`, which fails to export tables as `.png` files. It first saves the table as an HTML file and then converts it to a PNG using `webshot2`.
 #'
 #' @param k An output object from the `kable` function.
-#' @param filePath A character string specifying the full desired file path (e.g., 'myDir/figs/myTable.png') for the output PNG file.
+#' @param file_path A character string specifying the full desired file path (e.g., 'myDir/figs/myTable.png') for the output PNG file.
 #' @return No return value. The function saves the PNG file to the specified location.
 #' @examples
 #' # Save a kable output as a PNG file
@@ -84,11 +90,11 @@ col2hex <- function(color) {
 #' }
 #'
 #' @export
-save_kable_workaround <- function(k, filePath) {
-  htmlPath <- paste0(tools::file_path_sans_ext(filePath), ".html")
-  kableExtra::save_kable(x = k, file = htmlPath)
-  webshot2::webshot(htmlPath, file = filePath)
-  file.remove(htmlPath)
+save_kable_workaround <- function(k, file_path) {
+  html_path <- paste0(tools::file_path_sans_ext(file_path), ".html")
+  kableExtra::save_kable(x = k, file = html_path)
+  webshot2::webshot(html_path, file = file_path)
+  file.remove(html_path)
 }
 
 

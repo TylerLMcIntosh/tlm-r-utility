@@ -4,10 +4,10 @@
 #' This function retrieves geojson data from an ArcGIS REST API endpoint using pagination. It supports fetching a specified
 #' number of entries or all available entries from the API endpoint. Written with ChatGPT 4o assistance.
 #'
-#' @param baseUrl A character string. The base URL of the ArcGIS REST API endpoint.
-#' @param queryParams A list. Query parameters to be used in the API request. The list should contain the necessary
+#' @param base_url A character string. The base URL of the ArcGIS REST API endpoint.
+#' @param query_params A list. Query parameters to be used in the API request. The list should contain the necessary
 #' parameters required by the API, such as `where`, `outFields`, and `f`.
-#' @param maxRecord An integer. The maximum number of records that can be fetched in a single API request. This value is
+#' @param max_record An integer. The maximum number of records that can be fetched in a single API request. This value is
 #' usually defined by the ArcGIS REST API server limitations.
 #' @param n An integer or character. Specifies the total number of entries to fetch. If `"all"`, the function fetches
 #' all available records from the API. If an integer, it specifies the exact number of records to fetch.
@@ -17,15 +17,30 @@
 #' @import httr sf
 #' @examples
 #' \dontrun{
-#' baseUrl <- "https://example.com/arcgis/rest/services/your_service/FeatureServer/0/query"
-#' queryParams <- list(where = "1=1", outFields = "*", f = "geojson")
-#' maxRecord <- 100
+#' base_url <- "https://example.com/arcgis/rest/services/your_service/FeatureServer/0/query"
+#' query_params <- list(where = "1=1", outFields = "*", f = "geojson")
+#' max_record <- 100
 #' n <- 500  # Can also be "all"
-#' result <- get.x.from.arcgis.rest.api(baseUrl, queryParams, maxRecord, n)
+#' result <- get.x.from.arcgis.rest.api(base_url, query_params, max_record, n)
 #' print(result)
 #' }
 #' @export
-access.data.get.x.from.arcgis.rest.api.geojson <- function(baseUrl, queryParams, maxRecord, n, timeout) {
+access_data_get_x_from_arcgis_rest_api_geojson <- function(base_url, query_params, max_record, n, timeout) {
+  # Input validation
+  if (!is.character(base_url) || length(base_url) != 1) {
+    stop("Parameter 'base_url' must be a single character string.")
+  }
+  if (!is.list(query_params)) {
+    stop("Parameter 'query_params' must be a list.")
+  }
+  if (!is.numeric(max_record) || length(max_record) != 1 || max_record <= 0) {
+    stop("Parameter 'max_record' must be a positive integer.")
+  }
+  if (!is.numeric(timeout) || length(timeout) != 1 || timeout <= 0) {
+    stop("Parameter 'timeout' must be a positive integer.")
+  }
+  
+  
   # Initialize variables
   total_features <- list()
   offset <- 0
@@ -40,11 +55,11 @@ access.data.get.x.from.arcgis.rest.api.geojson <- function(baseUrl, queryParams,
   }
   
   repeat {
-    # Update the resultOffset parameter in queryParams
-    queryParams$resultOffset <- offset
+    # Update the resultOffset parameter in query_params
+    query_params$resultOffset <- offset
     
     # Make the GET request using the base URL and query parameters
-    response <- httr::GET(url = baseUrl, query = queryParams, httr::timeout(timeout))
+    response <- httr::GET(url = base_url, query = query_params, httr::timeout(timeout))
     
     # Check if the request was successful
     if (httr::status_code(response) == 200) {
@@ -61,12 +76,12 @@ access.data.get.x.from.arcgis.rest.api.geojson <- function(baseUrl, queryParams,
       cat(sprintf("Fetched %d records so far...\n", total_fetched))
       
       # Determine if we should stop fetching
-      if ((nrow(data) < maxRecord) || (!fetch_all && total_fetched >= n)) {
+      if ((nrow(data) < max_record) || (!fetch_all && total_fetched >= n)) {
         break
       }
       
       # Increment the offset by the maximum number of records for the next page
-      offset <- offset + maxRecord
+      offset <- offset + max_record
     } else {
       # Handle errors and provide meaningful messages
       error_message <- httr::content(response, "text", encoding = "UTF-8")
@@ -85,4 +100,131 @@ access.data.get.x.from.arcgis.rest.api.geojson <- function(baseUrl, queryParams,
   return(all_data_sf)
 }
 
+
+#' Fetch Data from an ArcGIS REST API Endpoint with Pagination (Parallel Version)
+#'
+#' This function retrieves geojson data from an ArcGIS REST API endpoint using pagination, optimized for parallel processing.
+#' It supports fetching a specified number of entries or all available entries from the API endpoint, with the ability to
+#' specify the number of cores for parallel processing.
+#'
+#' @param base_url A character string. The base URL of the ArcGIS REST API endpoint.
+#' @param query_params A list. Query parameters to be used in the API request. The list should contain the necessary
+#' parameters required by the API, such as `where`, `outFields`, and `f`.
+#' @param max_record An integer. The maximum number of records that can be fetched in a single API request. This value is
+#' usually defined by the ArcGIS REST API server limitations.
+#' @param n An integer or character. Specifies the total number of entries to fetch. If `"all"`, the function fetches
+#' all available records from the API. If an integer, it specifies the exact number of records to fetch.
+#' @param timeout An integer. The time in seconds to wait before timing out the request.
+#' @param n_cores An integer or `NA`. Specifies the number of cores to use for parallel processing. If `NA` (default), the
+#' function will use the default number of available cores.
+#' @return An `sf` object. A Simple Features (sf) object containing the fetched data.
+#' @import httr sf future.apply
+#' @examples
+#' \dontrun{
+#' base_url <- "https://example.com/arcgis/rest/services/your_service/FeatureServer/0/query"
+#' query_params <- list(where = "1=1", outFields = "*", f = "geojson")
+#' max_record <- 100
+#' n <- 500  # Can also be "all"
+#' result <- access_data_get_x_from_arcgis_rest_api_geojson_parallel(base_url, query_params, max_record, n, timeout = 60)
+#' print(result)
+#' }
+#' @export
+access_data_get_x_from_arcgis_rest_api_geojson_parallel <- function(base_url, query_params, max_record, n, timeout, n_cores = NA) {
+  # Load necessary libraries for parallel processing
+  if (!requireNamespace("future.apply", quietly = TRUE)) {
+    stop("Package 'future.apply' is required for parallel processing.")
+  }
+  
+  # Set the number of cores for parallel processing
+  if (is.na(n_cores)) {
+    future::plan(future::multisession)  # Use default number of cores
+  } else if (is.numeric(n_cores) && n_cores > 0) {
+    future::plan(future::multisession, workers = n_cores)  # Use specified number of cores
+  } else {
+    stop("Parameter 'n_cores' must be a positive integer or NA.")
+  }
+  
+  # Input validation
+  if (!is.character(base_url) || length(base_url) != 1) {
+    stop("Parameter 'base_url' must be a single character string.")
+  }
+  if (!is.list(query_params)) {
+    stop("Parameter 'query_params' must be a list.")
+  }
+  if (!is.numeric(max_record) || length(max_record) != 1 || max_record <= 0) {
+    stop("Parameter 'max_record' must be a positive integer.")
+  }
+  if (!is.numeric(timeout) || length(timeout) != 1 || timeout <= 0) {
+    stop("Parameter 'timeout' must be a positive integer.")
+  }
+  
+  # Determine the limit for fetching records
+  fetch_all <- FALSE
+  if (n == "all") {
+    fetch_all <- TRUE
+  } else if (!is.numeric(n) || n <= 0) {
+    stop("Parameter 'n' must be a positive integer or 'all'.")
+  }
+  
+  # Calculate the number of pages needed
+  total_to_fetch <- if (fetch_all) Inf else n
+  num_pages <- ceiling(total_to_fetch / max_record)
+  
+  # Helper function to fetch data for a specific page
+  fetch_page <- function(offset) {
+    query_params$resultOffset <- offset
+    query_params$resultRecordCount <- max_record
+    
+    # Make the GET request using the base URL and query parameters
+    response <- httr::GET(url = base_url, query = query_params, httr::timeout(timeout))
+    
+    # Check if the request was successful
+    if (httr::status_code(response) == 200) {
+      # Read the GeoJSON data directly into an sf object
+      data <- sf::st_read(httr::content(response, as = "text"), quiet = TRUE)
+      return(data)
+    } else {
+      # Handle errors and provide meaningful messages
+      error_message <- httr::content(response, "text", encoding = "UTF-8")
+      stop("Failed to fetch data: ", httr::status_code(response), " - ", error_message)
+    }
+  }
+  
+  # Use parallel processing to fetch pages concurrently
+  offsets <- seq(0, by = max_record, length.out = num_pages)
+  results <- future.apply::future_lapply(offsets, fetch_page)
+  
+  # Combine all fetched pages into one sf object
+  all_data_sf <- do.call(rbind, results)
+  
+  # If n is not "all", limit the output to the first n records
+  if (!fetch_all) {
+    all_data_sf <- all_data_sf[1:min(n, nrow(all_data_sf)), ]
+  }
+  
+  return(all_data_sf)
+}
+
+
+#' Access MTBS CONUS Polygons
+#'
+#' This function accesses the MTBS (Monitoring Trends in Burn Severity) CONUS (Continental United States) polygons by downloading and reading the MTBS perimeter shapefile directly from the USGS website. The shapefile is accessed via a URL and read into an `sf` object.
+#'
+#' @return An `sf` object containing the MTBS CONUS polygons.
+#' @examples
+#' \dontrun{
+#' mtbs_data <- access_data_mtbs_conus()
+#' print(mtbs_data)
+#' }
+#' @export
+access_data_mtbs_conus <- function() {
+  mtbs <- glue::glue(
+    "/vsizip/vsicurl/",
+    "https://edcintl.cr.usgs.gov/downloads/sciweb1/shared/MTBS_Fire/data/composite_data/burned_area_extent_shapefile/mtbs_perimeter_data.zip",
+    "/mtbs_perims_DD.shp"
+  ) |>
+    sf::st_read()
+  
+  return(mtbs)
+}
 
