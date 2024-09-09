@@ -1,6 +1,7 @@
 #' Write Shapefile to a New Directory and Create a Zipped Version
 #'
-#' This function writes an `sf` object to a shapefile in a new, file-specific directory and optionally creates a zipped version of the shapefile. It also allows for the removal of the original unzipped files and handles overwriting existing files.
+#' This function writes an `sf` object to a shapefile in a new, file-specific directory and optionally creates a zipped version of the shapefile.
+#' It also allows for the removal of the original unzipped files and handles overwriting existing files.
 #'
 #' @param shp An `sf` object to write as a shapefile.
 #' @param location A character string specifying the path of the directory to create the new file-specific subdirectory in.
@@ -17,63 +18,57 @@
 #'              zip_only = TRUE,
 #'              overwrite = TRUE)
 #' }
-#'
-#' @importFrom sf st_read
-#' @importFrom here here
-#' @importFrom glue glue
+#' @importFrom sf st_write
 #' @importFrom zip zip
+#' @importFrom utils file.copy
+#' @importFrom base dir.create file.path list.files unlink
 #' @export
 st_write_shp <- function(shp, location, filename, zip_only = FALSE, overwrite = FALSE) {
   
-  # Check if required packages are installed and loaded
-  required_packages <- c("zip", "sf", "here", "glue")
-  if (!all(sapply(required_packages, requireNamespace, quietly = TRUE))) {
-    stop("Please install the required packages: ", paste(required_packages, collapse = ", "))
-  }
-  
   # Define paths
-  zip_only_file <- here::here(location, glue::glue("{filename}.zip"))
-  out_dir <- here::here(location, filename)
+  out_dir <- file.path(location, filename)
+  zip_file <- file.path(out_dir, paste0(filename, ".zip"))
+  zip_file_dest <- file.path(location, paste0(filename, ".zip"))
   
   # Manage overwriting and directory creation
-  if (!zip_only && dir.exists(out_dir)) {
+  if (dir.exists(out_dir)) {
     if (overwrite) {
-      unlink(out_dir, recursive = TRUE)
+      base::unlink(out_dir, recursive = TRUE)
     } else {
-      stop("Directory already exists and overwrite is set to FALSE.")
+      stop("Directory '", out_dir, "' already exists and overwrite is set to FALSE.")
     }
   }
   
-  if (zip_only && file.exists(zip_only_file)) {
+  if (file.exists(zip_file_dest) && zip_only) {
     if (overwrite) {
-      unlink(zip_only_file)
+      base::unlink(zip_file_dest)
     } else {
-      stop("Zip file already exists and overwrite is set to FALSE.")
+      stop("Zip file '", zip_file_dest, "' already exists and overwrite is set to FALSE.")
     }
   }
   
+  # Create the directory
   if (!dir.exists(out_dir)) {
-    dir.create(out_dir)
+    base::dir.create(out_dir)
   }
   
   # Write the shapefile
-  sf::st_write(shp, here::here(out_dir, paste0(filename, ".shp")), append = FALSE)
+  shapefile_path <- file.path(out_dir, paste0(filename, ".shp"))
+  sf::st_write(shp, shapefile_path, append = FALSE)
   
   # Get all shapefile components
-  all_shp_files <- list.files(here::here(out_dir),
-                              pattern = paste0(filename, ".*"),
-                              full.names = TRUE)
+  all_shp_files <- base::list.files(out_dir, pattern = paste0(filename, ".*"), full.names = TRUE)
   
   # Create zip file
-  zipfile <- here::here(out_dir, paste0(filename, ".zip"))
-  zip::zip(zipfile = zipfile, files = all_shp_files, mode = "cherry-pick")
+  zip::zip(zipfile = zip_file, files = all_shp_files, mode = "cherry-pick")
   
   # Remove raw files if zip_only is TRUE
   if (zip_only) {
-    file.copy(zipfile, zip_only_file)
-    unlink(here::here(out_dir), recursive = TRUE)
+    utils::file.copy(zip_file, zip_file_dest)
+    base::unlink(out_dir, recursive = TRUE)
   }
 }
+
 
 #' Convert Bounding Box to String Format
 #'
