@@ -1,2 +1,2 @@
-# tlm-r-utility
-An R package of personal utility functions
+# tlmr: An R package of personal utility functions
+By: Tyler L. McIntosh
