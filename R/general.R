@@ -99,25 +99,35 @@ save_kable_workaround <- function(k, file_path) {
   file.remove(html_path)
 }
 
+
 #' Install and Load Required Packages Using pak
 #'
 #' This function checks if the specified packages (both CRAN and GitHub) are installed and loads them. 
 #' If any packages are missing, it offers to install them automatically or asks for user permission.
 #' It uses the `pak` package for faster and more efficient package installation.
 #'
-#' @param package_list A character vector of package names to check and install. 
-#' GitHub packages should be specified as "username/repo".
+#' @param package_list A list of package names to check and install (non-string, e.g., `c(dplyr, here)`).
+#' GitHub packages should be specified as `username/repo` in strings.
 #' @param auto_install A character ("y" or "n", default is "n"). If "y", installs all required packages 
 #' without asking for user permission. If "n", asks for permission from the user.
 #' @return No return value. Installs and loads the specified packages as needed.
 #' @examples
 #' \dontrun{
-#' install_and_load_packages(c("here", "dplyr", "tidyverse", "username/repo"))
+#' install_and_load_packages(c(dplyr, here, "username/repo"))
 #' }
 #' @importFrom pak pkg_install
 #' @importFrom utils install.packages
 #' @export
 install_and_load_packages <- function(package_list, auto_install = "n") {
+  # Convert non-string package names to strings
+  package_list <- lapply(package_list, function(pkg) {
+    if (is.symbol(pkg)) {
+      deparse(substitute(pkg))
+    } else {
+      pkg
+    }
+  })
+  
   # Check if pak is installed; install if not
   if (!requireNamespace("pak", quietly = TRUE)) {
     cat("The 'pak' package is required for fast installation of packages.\n")

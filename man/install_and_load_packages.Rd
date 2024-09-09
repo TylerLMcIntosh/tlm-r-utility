@@ -7,8 +7,8 @@
 install_and_load_packages(package_list, auto_install = "n")
 }
 \arguments{
-\item{package_list}{A character vector of package names to check and install. 
-GitHub packages should be specified as "username/repo".}
+\item{package_list}{A list of package names to check and install (non-string, e.g., `c(dplyr, here)`).
+GitHub packages should be specified as `username/repo` in strings.}
 
 \item{auto_install}{A character ("y" or "n", default is "n"). If "y", installs all required packages 
 without asking for user permission. If "n", asks for permission from the user.}
@@ -23,6 +23,6 @@ It uses the `pak` package for faster and more efficient package installation.
 }
 \examples{
 \dontrun{
-install_and_load_packages(c("here", "dplyr", "tidyverse", "username/repo"))
+install_and_load_packages(c(dplyr, here, "username/repo"))
 }
 }
