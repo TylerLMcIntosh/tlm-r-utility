@@ -18,6 +18,10 @@
 #'              overwrite = TRUE)
 #' }
 #'
+#' @importFrom sf st_read
+#' @importFrom here here
+#' @importFrom glue glue
+#' @importFrom zip zip
 #' @export
 st_write_shp <- function(shp, location, filename, zip_only = FALSE, overwrite = FALSE) {
   
@@ -92,6 +96,8 @@ st_write_shp <- function(shp, location, filename, zip_only = FALSE, overwrite = 
 #' bbox_string <- st_bbox_str(polygon)
 #' print(bbox_string)
 #' }
+#' 
+#' @importFrom sf st_bbox
 #' @export
 st_bbox_str <- function(shp) {
   bbox <- sf::st_bbox(shp)

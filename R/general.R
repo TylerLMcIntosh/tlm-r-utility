@@ -89,6 +89,8 @@ col2hex <- function(color) {
 #' save_kable_workaround(k, "myDir/figs/myTable.png")
 #' }
 #'
+#' @importFrom webshot2 webshot
+#' @importFrom kableExtra save_kable
 #' @export
 save_kable_workaround <- function(k, file_path) {
   html_path <- paste0(tools::file_path_sans_ext(file_path), ".html")
@@ -97,19 +99,37 @@ save_kable_workaround <- function(k, file_path) {
   file.remove(html_path)
 }
 
-#' Install and Load Required Packages
+#' Install and Load Required Packages Using pak
 #'
-#' This function checks if the specified packages (both CRAN and GitHub) are installed and loads them. If any packages are missing, it offers to install them automatically or asks for user permission.
+#' This function checks if the specified packages (both CRAN and GitHub) are installed and loads them. 
+#' If any packages are missing, it offers to install them automatically or asks for user permission.
+#' It uses the `pak` package for faster and more efficient package installation.
 #'
-#' @param package_list A character vector of package names to check and install. GitHub packages should be specified as "username/repo".
-#' @param auto_install A character ("y" or "n", default is "n"). If "y", installs all required packages without asking for user permission. If "n", asks for permission from the user.
+#' @param package_list A character vector of package names to check and install. 
+#' GitHub packages should be specified as "username/repo".
+#' @param auto_install A character ("y" or "n", default is "n"). If "y", installs all required packages 
+#' without asking for user permission. If "n", asks for permission from the user.
 #' @return No return value. Installs and loads the specified packages as needed.
 #' @examples
 #' \dontrun{
 #' install_and_load_packages(c("here", "dplyr", "tidyverse", "username/repo"))
 #' }
+#' @importFrom pak pkg_install
+#' @importFrom utils install.packages
 #' @export
 install_and_load_packages <- function(package_list, auto_install = "n") {
+  # Check if pak is installed; install if not
+  if (!requireNamespace("pak", quietly = TRUE)) {
+    cat("The 'pak' package is required for fast installation of packages.\n")
+    response <- if (auto_install == "y") "y" else readline(prompt = "\nDo you want to install the 'pak' package? (y/n): ")
+    if (tolower(response) == "y") {
+      utils::install.packages("pak")
+    } else {
+      stop("Installation cannot proceed without 'pak'. Please install it manually and rerun.")
+    }
+  }
+  
+  # Initialize lists to store missing CRAN and GitHub packages
   missing_cran_packages <- c()
   missing_github_packages <- c()
   
@@ -139,37 +159,23 @@ install_and_load_packages <- function(package_list, auto_install = "n") {
     }
   }
   
-  # Install missing CRAN packages
+  # Install missing CRAN packages using pak::pkg_install
   if (length(missing_cran_packages) > 0) {
     cat("The following CRAN packages are missing: ", paste(missing_cran_packages, collapse = ", "), "\n")
     response <- get_user_permission("\nDo you want to install the missing CRAN packages? (y/n): ")
     if (response == "y") {
-      install.packages(missing_cran_packages)
+      pak::pkg_install(missing_cran_packages, upgrade = TRUE)
     } else {
       cat("Skipping installation of missing CRAN packages.\n")
     }
   }
   
-  # Install 'remotes' package if needed for GitHub packages
-  if (length(missing_github_packages) > 0 && !requireNamespace("remotes", quietly = TRUE)) {
-    cat("The 'remotes' package is required to install GitHub packages.\n")
-    response <- get_user_permission("\nDo you want to install the 'remotes' package? (y/n): ")
-    if (response == "y") {
-      install.packages("remotes")
-    } else {
-      cat("Skipping installation of GitHub packages.\n")
-      missing_github_packages <- c() # Clear GitHub packages to skip their installation
-    }
-  }
-  
-  # Install missing GitHub packages
+  # Install missing GitHub packages using pak::pkg_install
   if (length(missing_github_packages) > 0) {
     cat("The following GitHub packages are missing: ", paste(missing_github_packages, collapse = ", "), "\n")
     response <- get_user_permission("\nDo you want to install the missing GitHub packages? (y/n): ")
     if (response == "y") {
-      for (pkg in missing_github_packages) {
-        remotes::install_github(pkg)
-      }
+      pak::pkg_install(missing_github_packages, upgrade = TRUE)
     } else {
       cat("Skipping installation of missing GitHub packages.\n")
     }

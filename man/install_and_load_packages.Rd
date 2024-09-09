@@ -2,20 +2,24 @@
 % Please edit documentation in R/general.R
 \name{install_and_load_packages}
 \alias{install_and_load_packages}
-\title{Install and Load Required Packages}
+\title{Install and Load Required Packages Using pak}
 \usage{
 install_and_load_packages(package_list, auto_install = "n")
 }
 \arguments{
-\item{package_list}{A character vector of package names to check and install. GitHub packages should be specified as "username/repo".}
+\item{package_list}{A character vector of package names to check and install. 
+GitHub packages should be specified as "username/repo".}
 
-\item{auto_install}{A character ("y" or "n", default is "n"). If "y", installs all required packages without asking for user permission. If "n", asks for permission from the user.}
+\item{auto_install}{A character ("y" or "n", default is "n"). If "y", installs all required packages 
+without asking for user permission. If "n", asks for permission from the user.}
 }
 \value{
 No return value. Installs and loads the specified packages as needed.
 }
 \description{
-This function checks if the specified packages (both CRAN and GitHub) are installed and loads them. If any packages are missing, it offers to install them automatically or asks for user permission.
+This function checks if the specified packages (both CRAN and GitHub) are installed and loads them. 
+If any packages are missing, it offers to install them automatically or asks for user permission.
+It uses the `pak` package for faster and more efficient package installation.
 }
 \examples{
 \dontrun{

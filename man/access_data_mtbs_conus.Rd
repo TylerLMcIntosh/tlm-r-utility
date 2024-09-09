@@ -17,4 +17,5 @@ This function accesses the MTBS (Monitoring Trends in Burn Severity) CONUS (Cont
 mtbs_data <- access_data_mtbs_conus()
 print(mtbs_data)
 }
+
 }

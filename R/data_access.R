@@ -24,6 +24,8 @@
 #' result <- get.x.from.arcgis.rest.api(base_url, query_params, max_record, n)
 #' print(result)
 #' }
+#' @importFrom httr GET status_code content timeout
+#' @importFrom sf st_read
 #' @export
 access_data_get_x_from_arcgis_rest_api_geojson <- function(base_url, query_params, max_record, n, timeout) {
   # Input validation
@@ -113,6 +115,9 @@ access_data_get_x_from_arcgis_rest_api_geojson <- function(base_url, query_param
 #' mtbs_data <- access_data_mtbs_conus()
 #' print(mtbs_data)
 #' }
+#' 
+#' @importFrom glue glue 
+#' @importFrom sf st_read 
 #' @export
 access_data_mtbs_conus <- function() {
   mtbs <- glue::glue(
@@ -142,6 +147,7 @@ access_data_mtbs_conus <- function() {
 #' epsg <- 4326
 #' data <- access_data_welty_jeffries(bbox_str = bbox, epsg_n = epsg)
 #' }
+#' 
 #' @export
 access_data_welty_jeffries <- function(bbox_str, epsg_n, where_param = "1=1", timeout = 600) {
   # Write out the URL query

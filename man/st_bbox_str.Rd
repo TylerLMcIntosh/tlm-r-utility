@@ -27,4 +27,5 @@ polygon <- st_sfc(st_polygon(list(rbind(c(0, 0), c(1, 0), c(1, 1), c(0, 1), c(0,
 bbox_string <- st_bbox_str(polygon)
 print(bbox_string)
 }
+
 }

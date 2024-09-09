@@ -33,4 +33,5 @@ bbox <- "-109,36,-102,41"
 epsg <- 4326
 data <- access_data_welty_jeffries(bbox_str = bbox, epsg_n = epsg)
 }
+
 }

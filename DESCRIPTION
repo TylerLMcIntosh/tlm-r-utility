@@ -23,4 +23,5 @@ Imports:
     future.apply,
     googledrive,
     devtools,
-    remotes
+    remotes,
+    pak
