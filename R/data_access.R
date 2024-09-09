@@ -169,4 +169,32 @@ access_data_welty_jeffries <- function(bbox_str, epsg_n, where_param = "1=1", ti
   return(welty)
 }
 
+#' Read CSV from Google Drive Path
+#'
+#' This function reads a CSV file directly from a specified Google Drive path using the `googledrive` package. It first retrieves the file using the provided path and then reads the content into a data frame.
+#'
+#' @param path A character string specifying the Google Drive path to the CSV file. The path can be a file ID, URL, or a full path to the file.
+#' @return A data frame containing the contents of the CSV file.
+#' @details The function uses the `googledrive` package to access Google Drive files. Ensure that you have authenticated with Google Drive using `googledrive::drive_auth()` before using this function.
+#' @examples
+#' \dontrun{
+#' # Example usage:
+#' csv_data <- access_data_read_csv_from_gdrive("your-file-id-or-url")
+#' head(csv_data)
+#' }
+#' @importFrom googledrive drive_get drive_read_string
+#' @importFrom utils read.csv
+#' @export
+read_csv_from_gdrive <- function(path) {
+  # Retrieve the file metadata from Google Drive
+  f <- googledrive::drive_get(path)
+  
+  # Read the content of the file as a string and convert it to a data frame
+  csv <- f |>
+    googledrive::drive_read_string() %>%
+    read.csv(text = .)
+  
+  return(csv)
+}
+
 

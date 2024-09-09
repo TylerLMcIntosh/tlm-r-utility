@@ -20,4 +20,7 @@ Imports:
     glue,
     httr,
     future,
-    future.apply
+    future.apply,
+    googledrive,
+    devtools,
+    remotes
