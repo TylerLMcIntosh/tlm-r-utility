@@ -70,3 +70,32 @@ st_write_shp <- function(shp, location, filename, zip_only = FALSE, overwrite = 
     unlink(here::here(out_dir), recursive = TRUE)
   }
 }
+
+#' Convert Bounding Box to String Format
+#'
+#' This function takes a spatial object (`sf` or `sfc` class) and returns a string representation of its bounding box
+#' coordinates in the format `xmin,ymin,xmax,ymax`. This format is useful for spatial queries in APIs and other geospatial operations.
+#'
+#' @param shp An `sf` (simple features) or `sfc` (simple feature geometry) object. This object should represent a spatial feature 
+#' or a collection of features from which the bounding box will be extracted.
+#'
+#' @return A character string in the format `xmin,ymin,xmax,ymax`, where `xmin`, `ymin`, `xmax`, and `ymax` are the bounding 
+#' box coordinates of the input spatial object.
+#'
+#' @importFrom sf st_bbox
+#' @examples
+#' \dontrun{
+#' library(sf)
+#' # Create a simple sf object (example polygon)
+#' polygon <- st_sfc(st_polygon(list(rbind(c(0, 0), c(1, 0), c(1, 1), c(0, 1), c(0, 0)))), crs = 4326)
+#' # Convert the bounding box to string format
+#' bbox_string <- st_bbox_str(polygon)
+#' print(bbox_string)
+#' }
+#' @export
+st_bbox_str <- function(shp) {
+  bbox <- sf::st_bbox(shp)
+  bbox_str <- sprintf("%f,%f,%f,%f", bbox$xmin, bbox$ymin, bbox$xmax, bbox$ymax)
+  return(bbox_str)
+}
+
