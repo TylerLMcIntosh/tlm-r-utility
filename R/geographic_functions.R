@@ -25,9 +25,6 @@ st_write_shp <- function(shp, location, filename, zipOnly, overwrite) {
   list.of.packages <- c("zip", "sf", "here")
   new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
   if (length(new.packages)) install.packages(new.packages)
-  library(zip)
-  library(sf)
-  library(here)
   
   # Create subdirectory & manage overwriting
   zipOnlyFile <- here::here(location, glue::glue("{filename}.zip"))
