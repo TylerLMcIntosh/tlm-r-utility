@@ -2,6 +2,7 @@
 
 export(access_data_get_x_from_arcgis_rest_api_geojson)
 export(access_data_mtbs_conus)
+export(access_data_welty_jeffries)
 export(col2hex)
 export(convert_pdf_to_png)
 export(convert_to_cmyk)

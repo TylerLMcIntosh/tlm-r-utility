@@ -125,3 +125,48 @@ access_data_mtbs_conus <- function() {
   return(mtbs)
 }
 
+
+#' Access Data from the Welty-Jeffries GIS Server
+#'
+#' This function retrieves geospatial data from the Welty-Jeffries GIS server using the specified bounding box and EPSG code. It constructs a URL query and sends a request to the server to fetch data in GeoJSON format.
+#'
+#' @param bbox_str A character string representing the bounding box in the format required by the GIS server. The format is usually "xmin,ymin,xmax,ymax".
+#' @param epsg_n An integer specifying the EPSG code for the spatial reference system to be used for the input and output data.
+#' @param where_param A character string representing the SQL WHERE clause to filter the data. Default is "1=1", which retrieves all records.
+#' @param timeout An integer specifying the timeout (in seconds) for the server request. Default is 600 seconds.
+#' @return A `sf` (simple features) object containing the geospatial data retrieved from the Welty-Jeffries GIS server.
+#' @examples
+#' \dontrun{
+#' # Example usage:
+#' bbox <- "-109,36,-102,41"
+#' epsg <- 4326
+#' data <- access_data_welty_jeffries(bbox_str = bbox, epsg_n = epsg)
+#' }
+#' @export
+access_data_welty_jeffries <- function(bbox_str, epsg_n, where_param = "1=1", timeout = 600) {
+  # Write out the URL query
+  base_url <- "https://gis.usgs.gov/sciencebase3/rest/services/Catalog/61aa537dd34eb622f699df81/MapServer/0/query"
+  query_params <- list(f = "geojson",
+                       where = where_param,
+                       outFields = "*",
+                       returnGeometry = "true",
+                       geometryType = "esriGeometryEnvelope",
+                       geometry = bbox_str,
+                       spatialRel = "esriSpatialRelIntersects",
+                       inSR = epsg_n,
+                       outSR = epsg_n
+  )
+  
+  # Request data
+  welty <- tlmr::access_data_get_x_from_arcgis_rest_api_geojson(
+    base_url = base_url, 
+    query_params = query_params, 
+    max_record = 1000, 
+    n = "all", 
+    timeout = timeout
+  )
+  
+  return(welty)
+}
+
+
