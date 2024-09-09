@@ -116,11 +116,10 @@ access_data_get_x_from_arcgis_rest_api_geojson <- function(base_url, query_param
 #' print(mtbs_data)
 #' }
 #' 
-#' @importFrom glue glue 
 #' @importFrom sf st_read 
 #' @export
 access_data_mtbs_conus <- function() {
-  mtbs <- glue::glue(
+  mtbs <- paste0(
     "/vsizip/vsicurl/",
     "https://edcintl.cr.usgs.gov/downloads/sciweb1/shared/MTBS_Fire/data/composite_data/burned_area_extent_shapefile/mtbs_perimeter_data.zip",
     "/mtbs_perims_DD.shp"
@@ -189,7 +188,6 @@ access_data_welty_jeffries <- function(bbox_str, epsg_n, where_param = "1=1", ti
 #' head(csv_data)
 #' }
 #' @importFrom googledrive drive_get drive_read_string
-#' @importFrom utils read.csv
 #' @export
 read_csv_from_gdrive <- function(path) {
   # Retrieve the file metadata from Google Drive

@@ -20,8 +20,6 @@
 #' }
 #' @importFrom sf st_write
 #' @importFrom zip zip
-#' @importFrom utils file.copy
-#' @importFrom base dir.create file.path list.files unlink
 #' @export
 st_write_shp <- function(shp, location, filename, zip_only = FALSE, overwrite = FALSE) {
   
@@ -33,7 +31,7 @@ st_write_shp <- function(shp, location, filename, zip_only = FALSE, overwrite = 
   # Manage overwriting and directory creation
   if (dir.exists(out_dir)) {
     if (overwrite) {
-      base::unlink(out_dir, recursive = TRUE)
+      unlink(out_dir, recursive = TRUE)
     } else {
       stop("Directory '", out_dir, "' already exists and overwrite is set to FALSE.")
     }
@@ -41,31 +39,29 @@ st_write_shp <- function(shp, location, filename, zip_only = FALSE, overwrite = 
   
   if (file.exists(zip_file_dest) && zip_only) {
     if (overwrite) {
-      base::unlink(zip_file_dest)
+      unlink(zip_file_dest)
     } else {
       stop("Zip file '", zip_file_dest, "' already exists and overwrite is set to FALSE.")
     }
   }
   
-  # Create the directory
-  if (!dir.exists(out_dir)) {
-    base::dir.create(out_dir)
-  }
+  # Create the directory if not there
+  tlmr::dir_ensure(out_dir)
   
   # Write the shapefile
   shapefile_path <- file.path(out_dir, paste0(filename, ".shp"))
   sf::st_write(shp, shapefile_path, append = FALSE)
   
   # Get all shapefile components
-  all_shp_files <- base::list.files(out_dir, pattern = paste0(filename, ".*"), full.names = TRUE)
+  all_shp_files <- list.files(out_dir, pattern = paste0(filename, ".*"), full.names = TRUE)
   
   # Create zip file
   zip::zip(zipfile = zip_file, files = all_shp_files, mode = "cherry-pick")
   
   # Remove raw files if zip_only is TRUE
   if (zip_only) {
-    utils::file.copy(zip_file, zip_file_dest)
-    base::unlink(out_dir, recursive = TRUE)
+    file.copy(zip_file, zip_file_dest)
+    unlink(out_dir, recursive = TRUE)
   }
 }
 

@@ -116,7 +116,6 @@ save_kable_workaround <- function(k, file_path) {
 #' install_and_load_packages(c(dplyr, here, "username/repo"))
 #' }
 #' @importFrom pak pkg_install
-#' @importFrom utils install.packages
 #' @export
 install_and_load_packages <- function(package_list, auto_install = "n") {
   # Convert non-string package names to strings
@@ -133,7 +132,7 @@ install_and_load_packages <- function(package_list, auto_install = "n") {
     cat("The 'pak' package is required for fast installation of packages.\n")
     response <- if (auto_install == "y") "y" else readline(prompt = "\nDo you want to install the 'pak' package? (y/n): ")
     if (tolower(response) == "y") {
-      utils::install.packages("pak")
+      install.packages("pak")
     } else {
       stop("Installation cannot proceed without 'pak'. Please install it manually and rerun.")
     }

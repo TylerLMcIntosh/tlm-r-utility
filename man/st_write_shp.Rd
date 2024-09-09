@@ -21,7 +21,8 @@ st_write_shp(shp, location, filename, zip_only = FALSE, overwrite = FALSE)
 No return value. The function writes a shapefile to a specified directory, optionally zips the files, and manages file cleanup based on user input.
 }
 \description{
-This function writes an `sf` object to a shapefile in a new, file-specific directory and optionally creates a zipped version of the shapefile. It also allows for the removal of the original unzipped files and handles overwriting existing files.
+This function writes an `sf` object to a shapefile in a new, file-specific directory and optionally creates a zipped version of the shapefile.
+It also allows for the removal of the original unzipped files and handles overwriting existing files.
 }
 \examples{
 \dontrun{
@@ -32,5 +33,4 @@ st_write_shp(shp = prepped_for_parks_etal,
              zip_only = TRUE,
              overwrite = TRUE)
 }
-
 }

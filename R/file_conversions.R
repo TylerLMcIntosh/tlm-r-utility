@@ -16,7 +16,6 @@
 #'
 #' @importFrom magick image_read image_write
 #' @importFrom here here
-#' @importFrom tools file_path_sans_ext
 #' @importFrom pdftools pdf_render_page
 #' @export
 convert_pdf_to_png <- function(pdf_file, dpi, out_dir = NA) {
@@ -64,7 +63,6 @@ convert_pdf_to_png <- function(pdf_file, dpi, out_dir = NA) {
 #' # Convert a single file to CMYK format and save it in the same directory
 #' convert_to_cmyk(file = "example.png")
 #'
-#' @importFrom tools file_path_sans_ext file_ext
 #' @export
 convert_to_cmyk <- function(file, out_dir = NA) {
   
