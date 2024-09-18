@@ -201,4 +201,48 @@ read_csv_from_gdrive <- function(path) {
   return(csv)
 }
 
+#' Download a file from Google Drive to a local directory
+#'
+#' This function downloads a file from a Google Drive path to a specified local path.
+#'
+#' @param gDrivePath A character string. The path or name of the file on Google Drive.
+#' @param localPath A character string. The local path where the file will be saved.
+#' @param overwrite A logical value indicating whether to overwrite the file if it already exists at the local path. Defaults to `TRUE`.
+#'
+#' @details This function retrieves a file's ID from Google Drive using the provided `gDrivePath` and downloads it to the local directory specified by `localPath`. The file will be overwritten if `overwrite` is set to `TRUE` (default).
+#' 
+#' @return The downloaded file will be saved to the specified `localPath`.
+#' 
+#' @note You must be authenticated with Google Drive via the `googledrive` package for this function to work.
+#' 
+#' @importFrom googledrive drive_get drive_download as_id
+#' 
+#' @examples
+#' \dontrun{
+#' # Example usage:
+#' download_data_from_gdrive("path/to/file/on/drive", "path/to/local/file.csv")
+#' }
+#' 
+#' @export
+download_data_from_gdrive <- function(gDrivePath, localPath) {
+  # Validate inputs
+  if (missing(gDrivePath) || missing(localPath)) {
+    stop("Both 'gDrivePath' and 'localPath' must be provided.")
+  }
+  if (!is.character(gDrivePath) || !nzchar(gDrivePath)) {
+    stop("'gDrivePath' must be a non-empty string.")
+  }
+  if (!is.character(localPath) || !nzchar(localPath)) {
+    stop("'localPath' must be a non-empty string.")
+  }
+  
+  # Retrieve file ID from GDrive
+  f <- googledrive::drive_get(gDrivePath)
+  id <- f$id
+  nm <- f$name
+  
+  googledrive::drive_download(googledrive::as_id(id), path = localPath, overwrite = TRUE)
+}
+
+
 
