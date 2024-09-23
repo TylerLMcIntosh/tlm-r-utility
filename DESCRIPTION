@@ -24,4 +24,6 @@ Imports:
     googledrive,
     devtools,
     remotes,
-    pak
+    pak,
+    purrr,
+    rstac

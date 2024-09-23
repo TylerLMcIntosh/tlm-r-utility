@@ -1,3 +1,5 @@
+# ACCESS DATA FUNCTIONS ----
+
 
 #' Fetch Data from an ArcGIS REST API Endpoint with Pagination
 #'
@@ -174,6 +176,472 @@ access_data_welty_jeffries <- function(bbox_str, epsg_n, where_param = "1=1", ti
   return(welty)
 }
 
+
+
+#' Access EPA Level I Ecoregions Data via VSI
+#'
+#' This function retrieves the U.S. EPA Level I ecoregions shapefile from a remote server via VSI (Virtual Spatial Infrastructure).
+#' The shapefile is stored in a ZIP file, and the function accesses it without downloading the file locally.
+#'
+#' @return A `sf` (simple features) object containing the EPA Level I ecoregions shapefile data.
+#' 
+#' @details
+#' The function accesses the EPA Level I ecoregions shapefile directly from the EPA's data commons, utilizing the `/vsizip/` 
+#' and `/vsicurl/` mechanisms to stream the shapefile from the zipped file. The file is accessed via a URL without the need to 
+#' download it locally. This method allows efficient access to the shapefile data using the `sf` package.
+#'
+#' @source
+#' U.S. EPA Ecoregions Data: \url{https://gaftp.epa.gov/EPADataCommons/ORD/Ecoregions/cec_na/}
+#'
+#' @references
+#' U.S. EPA Ecoregions Information: \url{https://www.epa.gov/eco-research/ecoregions-north-america}
+#'
+#' @importFrom sf st_read
+#' @export
+#' @examples
+#' # Example usage
+#' epa_ecoregions <- access_data_epa_l1_ecoregions_vsi()
+#'
+access_data_epa_l1_ecoregions_vsi <- function() {
+  epa_l1 <- paste0(
+    "/vsizip/vsicurl/",
+    "https://gaftp.epa.gov/EPADataCommons/ORD/Ecoregions/cec_na/na_cec_eco_l1.zip",
+    "/NA_CEC_Eco_Level1.shp"
+  ) |>
+    sf::st_read()
+  
+  return(epa_l1)
+}
+
+
+
+#' Access EPA Level II Ecoregions Data via VSI
+#'
+#' This function retrieves the U.S. EPA Level II ecoregions shapefile from a remote server via VSI (Virtual Spatial Infrastructure).
+#' The shapefile is stored in a ZIP file, and the function accesses it without downloading the file locally.
+#'
+#' @return A `sf` (simple features) object containing the EPA Level II ecoregions shapefile data.
+#' 
+#' @details
+#' The function accesses the EPA Level II ecoregions shapefile directly from the EPA's data commons, utilizing the `/vsizip/` 
+#' and `/vsicurl/` mechanisms to stream the shapefile from the zipped file. The file is accessed via a URL without the need to 
+#' download it locally. This method allows efficient access to the shapefile data using the `sf` package.
+#'
+#' @source
+#' U.S. EPA Ecoregions Data: \url{https://gaftp.epa.gov/EPADataCommons/ORD/Ecoregions/cec_na/}
+#'
+#' @references
+#' U.S. EPA Ecoregions Information: \url{https://www.epa.gov/eco-research/ecoregions-north-america}
+#'
+#' @importFrom sf st_read
+#' @export
+#' @examples
+#' # Example usage
+#' epa_ecoregions <- access_data_epa_l2_ecoregions_vsi()
+#'
+access_data_epa_l2_ecoregions_vsi <- function() {
+  epa_l2 <- paste0(
+    "/vsizip/vsicurl/",
+    "https://gaftp.epa.gov/EPADataCommons/ORD/Ecoregions/cec_na/na_cec_eco_l2.zip",
+    "/NA_CEC_Eco_Level2.shp"
+  ) |>
+    sf::st_read()
+  
+  return(epa_l2)
+}
+
+
+#' Access EPA Level III Ecoregions Data via VSI
+#'
+#' This function retrieves the U.S. EPA Level III ecoregions shapefile from a remote server via VSI (Virtual Spatial Infrastructure).
+#' The shapefile is stored in a ZIP file, and the function accesses it without downloading the file locally.
+#'
+#' @return A `sf` (simple features) object containing the EPA Level III ecoregions shapefile data.
+#' 
+#' @details
+#' The function accesses the EPA Level III ecoregions shapefile directly from the EPA's data commons, utilizing the `/vsizip/` 
+#' and `/vsicurl/` mechanisms to stream the shapefile from the zipped file. The file is accessed via a URL without the need to 
+#' download it locally. This method allows efficient access to the shapefile data using the `sf` package.
+#'
+#' @source
+#' U.S. EPA Ecoregions Data: \url{https://gaftp.epa.gov/EPADataCommons/ORD/Ecoregions/us/}
+#' 
+#' @references
+#' U.S. EPA Ecoregions Information: \url{https://www.epa.gov/eco-research/ecoregions-north-america}
+#'
+#' @importFrom sf st_read
+#' @export
+#' @examples
+#' # Example usage
+#' epa_ecoregions <- access_data_epa_l3_ecoregions_vsi()
+#'
+access_data_epa_l3_ecoregions_vsi <- function() {
+  epa_l3 <- paste0(
+    "/vsizip/vsicurl/",
+    "https://gaftp.epa.gov/EPADataCommons/ORD/Ecoregions/us/us_eco_l3.zip",
+    "/us_eco_l3.shp"
+  ) |>
+    sf::st_read()
+  
+  return(epa_l3)
+}
+
+
+#' Access EPA Level IV Ecoregions Data via VSI
+#'
+#' This function retrieves the U.S. EPA Level IV ecoregions shapefile from a remote server via VSI (Virtual Spatial Infrastructure).
+#' The shapefile is stored in a ZIP file, and the function accesses it without downloading the file locally.
+#'
+#' @return A `sf` (simple features) object containing the EPA Level IV ecoregions shapefile data.
+#' 
+#' @details
+#' The function accesses the EPA Level IV ecoregions shapefile directly from the EPA's data commons, utilizing the `/vsizip/` 
+#' and `/vsicurl/` mechanisms to stream the shapefile from the zipped file. The file is accessed via a URL without the need to 
+#' download it locally. This method allows efficient access to the shapefile data using the `sf` package.
+#'
+#' @source
+#' U.S. EPA Ecoregions Data: \url{https://gaftp.epa.gov/EPADataCommons/ORD/Ecoregions/us/}
+#' 
+#' @references
+#' U.S. EPA Ecoregions Information: \url{https://www.epa.gov/eco-research/ecoregions-north-america}
+#'
+#' @importFrom sf st_read
+#' @export
+#' @examples
+#' # Example usage
+#' epa_ecoregions <- access_data_epa_l4_ecoregions_vsi()
+#'
+access_data_epa_l4_ecoregions_vsi <- function() {
+  epa_l4 <- paste0(
+    "/vsizip/vsicurl/",
+    "https://gaftp.epa.gov/EPADataCommons/ORD/Ecoregions/us/us_eco_l4.zip",
+    "/us_eco_l4_no_st.shp"
+  ) |>
+    sf::st_read()
+  
+  return(epa_l4)
+}
+
+
+
+
+#' Access LCMS CONUS v2023.9 Data via VSI
+#'
+#' This function allows you to access LCMS (Land Cover Monitoring System) CONUS v2023.9 annual land cover data
+#' for a specified year via the VSI (Virtual Spatial Infrastructure) system. The function retrieves the
+#' raster file from a remote USDA data server.
+#'
+#' @param year Integer or character. The year for which LCMS data is being accessed (e.g., 2020).
+#'
+#' @return A `SpatRaster` object from the `terra` package containing the land cover data for the specified year.
+#' 
+#' @details
+#' This function accesses the LCMS dataset stored remotely and retrieves the appropriate raster file for
+#' the given year. The file is accessed via the VSI system using the `/vsizip/` and `/vsicurl/` protocols to
+#' read the zipped GeoTIFF directly from the USDA website without downloading it locally.
+#'
+#' @source
+#' USDA Forest Service LCMS Data: \url{https://data.fs.usda.gov/geodata/rastergateway/LCMS/}
+#'
+#' @importFrom terra rast
+#' @export
+#' @examples
+#' # Example usage
+#' lcms_raster <- access_lcms_conus_v20239_via_vsi(2020)
+#' 
+#' # Access data for the year 2019
+#' lcms_raster_2019 <- access_data_lcms_conus_v20239_via_vsi("2019")
+access_data_lcms_conus_v20239_vsi <- function(year) {
+  
+  # Allow both character and numeric values for 'year'
+  if (is.numeric(year)) {
+    year <- as.character(year)
+  }
+  
+  # Ensure that the year is valid
+  yearNum <- as.numeric(year)
+  if (yearNum < 1985 || yearNum > 2023) {
+    stop("'year' must be from 1985-2023")
+  }
+  
+  #Access LCMS data via VSI from this data page: https://data.fs.usda.gov/geodata/rastergateway/LCMS/
+  lcms_layer <- paste0(
+    "/vsizip/vsicurl/",
+    "https://data.fs.usda.gov/geodata/LCMS/LCMS_CONUS_v2023-9_Land_Cover_Annual_", year, ".zip",
+    "/LCMS_CONUS_v2023-9_Land_Cover_", year, ".tif") |>
+    terra::rast()
+  
+  names(lcms_layer) <- paste0("lcms_", year)
+  
+  return(lcms_layer)
+  
+}
+
+
+#' Access LCMS CONUS v2023.9 Data via VSI
+#'
+#' This function allows you to access LCMS (Land Cover Monitoring System) CONUS v2023.9 annual land cover data
+#' for a specified year range via the VSI (Virtual Spatial Infrastructure) system. The function retrieves the
+#' raster files from a remote USDA data server.
+#'
+#' @param earliest_year Integer or character. The earliest year for which LCMS data is being accessed (e.g., 2020).
+#' @param earliest_year Integer or character. The latest year for which LCMS data is being accessed (e.g., 2022). Must be greater than or equal to earliest_year
+#'
+#' @return A `SpatRaster` object from the `terra` package containing the land cover data for the specified year.
+#' 
+#' @details
+#' This function accesses the LCMS dataset stored remotely and retrieves the appropriate raster file for
+#' the given year. The file is accessed via the VSI system using the `/vsizip/` and `/vsicurl/` protocols to
+#' read the zipped GeoTIFF directly from the USDA website without downloading it locally.
+#'
+#' @source
+#' USDA Forest Service LCMS Data: \url{https://data.fs.usda.gov/geodata/rastergateway/LCMS/}
+#'
+#' @importFrom terra rast
+#' @export
+#' @examples
+#' # Example usage
+#' lcms_raster <- access_lcms_conus_v20239_via_vsi(2020)
+#' 
+#' # Access data for the year 2019
+#' lcms_raster_2019 <- access_data_lcms_conus_v20239_via_vsi("2019")
+access_data_lcms_conus_v20239_vsi_year_range <- function(earliest_year, latest_year) {
+  # Validate year inputs
+  if (!is.numeric(earliest_year) && !is.character(earliest_year)) {
+    stop("'earliest_year' must be numeric or a character string representing a year.")
+  }
+  if (!is.numeric(latest_year) && !is.character(latest_year)) {
+    stop("'latest_year' must be numeric or a character string representing a year.")
+  }
+  
+  # Convert character strings to numeric years 
+  if (is.character(earliest_year)) {
+    earliest_year <- as.numeric(earliest_year)
+  }
+  if (is.character(latest_year)) {
+    latest_year <- as.numeric(latest_year)
+  }
+  
+  # Ensure earliest_year <= latest_year
+  if (earliest_year > latest_year) {
+    stop("'earliest_year' must be less than or equal to 'latest_year'.")
+  }
+  
+  # Ensure that the years are valid
+  if (earliest_year < 1985 || latest_year > 2021) {
+    stop("The year range requested must be from 1985-2021")
+  }
+  
+  years <- seq(earliest_year, latest_year)
+  
+  dats <- years |>
+    purrr::map(~ access_data_lcms_conus_v20239_vsi(.x)) |>
+    terra::rast()
+  
+  return(dats)
+  
+}
+
+
+
+
+#' Access LCMAP v13 Data via STAC
+#'
+#' This function retrieves LCMAP (Land Change Monitoring, Assessment, and Projection) data for a specified year
+#' and area of interest (AOI) using the STAC API. It downloads the LCMAP raster data and returns it as a `SpatRaster` object.
+#'
+#' @param year Integer or character representing the year of interest.
+#' @param aoi An `sf` object representing the area of interest (AOI). Must have a valid CRS, which will be transformed to EPSG:4326.
+#'
+#' @return A `SpatRaster` object representing the LCMAP data for the specified years and AOI with each year in a layer named "lcmap_[YEAR]"
+#' 
+#' @details
+#' The function queries the Microsoft Planetary Computer's STAC API for the USGS LCMAP dataset. It constructs the correct 
+#' vsicurl URL to stream the data and processes it using GDAL's `warp` function. The returned raster is cropped to the 
+#' specified AOI.
+#' 
+#' @source
+#' STAC API: \url{https://planetarycomputer.microsoft.com/api/stac/v1}
+#' 
+#' @references
+#' Code adapted from: \url{https://stacspec.org/en/tutorials/1-download-data-using-r/}
+#'
+#' @importFrom rstac stac stac_search get_request assets_url
+#' @importFrom sf st_transform st_bbox st_crs gdal_utils
+#' @importFrom terra rast
+#' @export
+#' @examples
+#' \dontrun{
+#' aoi <- sf::st_as_sfc(sf::st_bbox(c(xmin = -120, xmax = -119, ymin = 34, ymax = 35), crs = 4326))
+#' lcmap_raster <- access_data_lcmap_v13_stac_single_year(2000, aoi)
+#' }
+access_data_lcmap_v13_stac_single_year <- function(year, aoi) {
+  
+  # Convert numeric year to character string
+  if (is.numeric(year)) {
+    year <- as.character(year)
+  }
+  
+  # Ensure that the year is valid
+  yearNum <- as.numeric(year)
+  if (yearNum < 1985 || yearNum > 2021) {
+    stop("'year' must be from 1985-2021")
+  }
+  
+  # Ensure the AOI is a valid sf object and transform to EPSG:4326
+  if (!inherits(aoi, "sf")) {
+    stop("'aoi' must be a valid 'sf' object.")
+  }
+  aoi <- sf::st_transform(aoi, "EPSG:4326")
+  bbox4326 <- sf::st_bbox(aoi)
+  
+  # Perform STAC query
+  stac_query <- tryCatch({
+    rstac::stac("https://planetarycomputer.microsoft.com/api/stac/v1") |>
+      rstac::stac_search(
+        collections = "usgs-lcmap-conus-v13",
+        bbox = bbox4326,
+        datetime = paste0(year, "-01-01/", year, "-12-31")
+      ) |>
+      rstac::get_request()
+  }, error = function(e) {
+    stop("Failed to query the STAC API: ", e$message)
+  })
+  
+  # Ensure query returned results
+  if (length(stac_query$features) == 0) {
+    stop("No data found for the given date range and AOI.")
+  }
+  
+  
+  # Helper function to create a vsicurl URL
+  make_lcmap_vsicurl_url <- function(base_url) {
+    paste0(
+      "/vsicurl", 
+      "?pc_url_signing=yes",
+      "&pc_collection=usgs-lcmap-conus-v13",
+      "&url=",
+      base_url
+    )
+  }
+  
+  # Extract the LCMAP primary raster URL (lcpri)
+  lcpri_url <- tryCatch({
+    make_lcmap_vsicurl_url(rstac::assets_url(stac_query, "lcpri"))
+  }, error = function(e) {
+    stop("Failed to retrieve 'lcpri' asset URL: ", e$message)
+  })
+  
+  
+  # Prepare output file
+  out_file <- tempfile(fileext = ".tif")
+  
+  # Use GDAL to download and process the raster data
+  tryCatch({
+    sf::gdal_utils(
+      "warp",
+      source = lcpri_url,
+      destination = out_file,
+      options = c(
+        "-t_srs", sf::st_crs(aoi)$wkt,
+        "-te", sf::st_bbox(aoi)
+      )
+    )
+  }, error = function(e) {
+    stop("GDAL warp process failed: ", e$message)
+  })
+  
+  # Load the processed raster and return
+  tryCatch({
+    raster_output <- terra::rast(out_file)
+  }, error = function(e) {
+    stop("Failed to create raster from the downloaded file: ", e$message)
+  })
+  
+  # Set layer names in the format "lcmap_year"
+  names(raster_output) <- paste0("lcmap_", year)
+  
+  return(raster_output)
+}
+
+
+#' Access LCMAP v13 Data via STAC
+#'
+#' This function retrieves LCMAP (Land Change Monitoring, Assessment, and Projection) data for a specified range of years
+#' and area of interest (AOI) using the STAC API. It downloads the LCMAP raster data and returns it as a `SpatRaster` object.
+#'
+#' @param earliest_year Integer or character representing the earliest year of interest.
+#' @param latest_year Integer or character representing the latest year of interest. Must be equal to or greater than the earliest year.
+#' @param aoi An `sf` object representing the area of interest (AOI). Must have a valid CRS, which will be transformed to EPSG:4326.
+#'
+#' @return A `SpatRaster` object representing the LCMAP data for the specified years and AOI, with each year in a layer named "lcmap_[YEAR]"
+#' 
+#' @details
+#' The function queries the Microsoft Planetary Computer's STAC API for the USGS LCMAP dataset. It constructs the correct 
+#' vsicurl URL to stream the data and processes it using GDAL's `warp` function. The returned raster is cropped to the 
+#' specified AOI.
+#' 
+#' @source
+#' STAC API: \url{https://planetarycomputer.microsoft.com/api/stac/v1}
+#' 
+#' @references
+#' Code adapted from: \url{https://stacspec.org/en/tutorials/1-download-data-using-r/}
+#'
+#' @importFrom terra rast
+#' @importFrom purrr map
+#' @export
+#' @examples
+#' \dontrun{
+#' aoi <- sf::st_as_sfc(sf::st_bbox(c(xmin = -120, xmax = -119, ymin = 34, ymax = 35), crs = 4326))
+#' lcmap_raster <- access_data_lcmap_v13_stac_year_range(2000, 2003, aoi)
+#' }
+access_data_lcmap_v13_stac_year_range <- function(earliest_year, latest_year, aoi) {
+  # Validate year inputs
+  if (!is.numeric(earliest_year) && !is.character(earliest_year)) {
+    stop("'earliest_year' must be numeric or a character string representing a year.")
+  }
+  if (!is.numeric(latest_year) && !is.character(latest_year)) {
+    stop("'latest_year' must be numeric or a character string representing a year.")
+  }
+  
+  # Convert character strings to numeric years 
+  if (is.character(earliest_year)) {
+    earliest_year <- as.numeric(earliest_year)
+  }
+  if (is.character(latest_year)) {
+    latest_year <- as.numeric(latest_year)
+  }
+  
+  # Ensure earliest_year <= latest_year
+  if (earliest_year > latest_year) {
+    stop("'earliest_year' must be less than or equal to 'latest_year'.")
+  }
+  
+  # Ensure that the years are valid
+  if (earliest_year < 1985 || latest_year > 2021) {
+    stop("The year range requested must be from 1985-2021")
+  }
+  
+  # Ensure the AOI is a valid sf object
+  if (!inherits(aoi, "sf")) {
+    stop("'aoi' must be a valid 'sf' object.")
+  }
+  
+  years <- seq(earliest_year, latest_year)
+  
+  
+  dats <- years |>
+    purrr::map(~ access_data_lcmap_v13_stac_single_year(.x, aoi)) |>
+    terra::rast()
+  
+  return(dats)
+  
+}
+
+
+
+# DATA MANAGEMENT FUNCTIONS ---- 
+
 #' Read CSV from Google Drive Path
 #'
 #' This function reads a CSV file directly from a specified Google Drive path using the `googledrive` package. It first retrieves the file using the provided path and then reads the content into a data frame.
@@ -243,6 +711,4 @@ download_data_from_gdrive <- function(gDrivePath, localPath) {
   
   googledrive::drive_download(googledrive::as_id(id), path = localPath, overwrite = TRUE)
 }
-
-
 
