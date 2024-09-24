@@ -26,4 +26,6 @@ Imports:
     remotes,
     pak,
     purrr,
+    rlang,
+    mblm,
     rstac
