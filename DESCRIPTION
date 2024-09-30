@@ -21,6 +21,8 @@ Imports:
     httr,
     future,
     future.apply,
+    parallel,
+    tictoc,
     googledrive,
     devtools,
     remotes,

@@ -96,3 +96,91 @@ st_bbox_str <- function(shp) {
   return(bbox_str)
 }
 
+#' Clip a raster to a vector with careful handling of projections
+#'
+#' This function clips a raster to the extent of a vector, ensuring that the
+#' raster and vector are in the same projection system. It supports raster and
+#' vector objects from both the `terra` and `raster` packages. If the input raster
+#' or vector is packed (for parallelized workflows), it will be unpacked before
+#' processing and optionally re-packed afterward. 
+#'
+#' @param raster A SpatRaster, PackedSpatRaster, RasterLayer, RasterStack, or RasterBrick object. 
+#'        The raster to be clipped.
+#' @param vector A SpatVector, PackedSpatVector, or sf object. The vector defining the clipping boundary.
+#' @param mask Logical. Should the raster be masked to the vector? Defaults to `FALSE`.
+#' @param verbose Logical. If `TRUE`, provides detailed output of the steps being performed.
+#'
+#' @return A raster object clipped to the vector's extent, returned in the same format as the input raster.
+#' @examples
+#' \dontrun{
+#' raster_obj <- terra::rast(system.file("ex/logo.tif", package = "terra"))
+#' vector_obj <- terra::vect(system.file("ex/logo.shp", package = "terra"))
+#' cropped_raster <- st_crop_careful_universal(raster_obj, vector_obj, mask = TRUE, verbose = TRUE)
+#' }
+#' @export
+#' @importFrom terra unwrap wrap crop mask crs same.crs
+#' @importFrom raster crs crop mask
+#' @importFrom sf st_as_sf st_crs st_transform
+
+st_crop_careful_universal <- function(raster, vector, mask = FALSE, verbose = FALSE) {
+  pack <- FALSE
+  
+  # Unpack if parallelized inputs (PackedSpatRaster)
+  if (inherits(raster, "PackedSpatRaster")) {
+    if (verbose) print("Unpacking raster...")
+    raster <- terra::unwrap(raster)
+    pack <- TRUE
+  }
+  if (inherits(vector, "PackedSpatVector")) {
+    if (verbose) print("Unpacking vector...")
+    vector <- sf::st_as_sf(terra::unwrap(vector))
+  }
+  
+  # Handle SpatVector by converting to sf if necessary
+  if (inherits(vector, "SpatVector")) {
+    vector <- sf::st_as_sf(vector)
+  }
+  
+  # Process for raster package objects (RasterLayer, RasterStack, RasterBrick)
+  if (inherits(raster, c("RasterLayer", "RasterStack", "RasterBrick"))) {
+    
+    # Check if CRS is different and reproject vector if needed
+    if (!raster::crs(vector) == raster::crs(raster)) {
+      if (verbose) print("Reprojecting vector to raster CRS...")
+      vector <- sf::st_transform(vector, raster::crs(raster))
+    } else {
+      if (verbose) print("Vector already in raster CRS")
+    }
+    
+    # Perform crop and optional masking
+    if (verbose) print("Clipping raster using vector...")
+    r <- raster::crop(raster, vector)
+    if (mask) {
+      if (verbose) print("Applying mask to raster...")
+      r <- raster::mask(r, vector)
+    }
+    return(r)
+    
+  } else {  # Process for terra package objects
+    
+    # Check if CRS is different and reproject vector if needed
+    if (!terra::same.crs(vector, raster)) {
+      if (verbose) print("Reprojecting vector to raster CRS...")
+      vector <- sf::st_transform(vector, terra::crs(raster))
+    } else {
+      if (verbose) print("Vector already in raster CRS")
+    }
+    
+    # Perform crop and optional masking
+    if (verbose) print("Clipping raster using vector...")
+    r <- terra::crop(raster, vector, mask = mask)
+    
+    # Repack if the input was packed
+    if (pack) {
+      if (verbose) print("Repacking raster...")
+      r <- terra::wrap(r)
+    }
+    return(r)
+  }
+}
+
