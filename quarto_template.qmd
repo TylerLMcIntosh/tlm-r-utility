@@ -1,0 +1,81 @@
+---
+title: "TITLE HERE"
+author: "Tyler L. McIntosh"
+date: last-modified
+format:
+  html:
+    embed-resources: true
+    html-math-method: katex
+    css: styles.css
+    toc: true
+    toc-depth: 1
+    toc-title: Contents
+    toc-location: right
+    code-fold: true
+    code-summary: "Show the code"
+---
+
+
+# Overview & Takeaways
+
+
+# Data overview
+
+# Setup
+
+```{r setup-chunk, message = FALSE, warning = FALSE}
+
+if(!requireNamespace("here", quietly = TRUE)) {
+  install.packages("here")
+}
+library(here)
+
+source(here::here("code", "functions.R"))
+
+install_and_load_packages(c("sf",
+                            "here",
+                            "httr",
+                            "glue",
+                            "patchwork",
+                            "tidyverse"))
+
+dir_raw <- here::here("data", "raw")
+dir_derived <- here::here("data", "derived")
+dir_ensure(dir_raw,
+           dir_derived)
+
+
+# Load data
+
+
+
+```
+
+
+# Operate
+
+```{r xxx}
+
+
+
+```
+
+
+
+
+
+<button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapseOne">
+
+Click to show R Session Information
+
+</button>
+
+:::: {#collapseOne .accordion-collapse .collapse}
+<div>
+
+```{r sessionInfo}
+sessionInfo()
+```
+
+</div>
+::::

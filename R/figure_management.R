@@ -95,3 +95,69 @@ convert_to_cmyk <- function(file, out_dir = NA) {
   # Print the status message
   cat("Converted:", file_path, "to CMYK and saved as:", new_file_nm, "\n")
 }
+
+
+#' Save Kable Output as PNG with Workaround
+#'
+#' This function provides a workaround for an issue (as of 3/20/24) with `kableExtra::save_kable`, which fails to export tables as `.png` files. It first saves the table as an HTML file and then converts it to a PNG using `webshot2`.
+#'
+#' @param k An output object from the `kable` function.
+#' @param file_path A character string specifying the full desired file path (e.g., 'myDir/figs/myTable.png') for the output PNG file.
+#' @return No return value. The function saves the PNG file to the specified location.
+#' @examples
+#' # Save a kable output as a PNG file
+#' \dontrun{
+#' k <- knitr::kable(head(mtcars))
+#' save_kable_workaround(k, "myDir/figs/myTable.png")
+#' }
+#'
+#' @importFrom webshot2 webshot
+#' @importFrom kableExtra save_kable
+#' @export
+save_kable_workaround <- function(k, file_path) {
+  html_path <- paste0(tools::file_path_sans_ext(file_path), ".html")
+  kableExtra::save_kable(x = k, file = html_path)
+  webshot2::webshot(html_path, file = file_path)
+  file.remove(html_path)
+}
+
+#' Create a Bivariate Palette Using a Color Vector
+#'
+#' Generates a biscale-compatible palette from a set of nine hex color codes.
+#'
+#' @param p_vec A character vector of exactly 9 hex color codes.
+#' @param flip A logical value. If `TRUE`, the palette is reversed.
+#'
+#' @return A list containing:
+#'   - `biscale_pal`: A named character vector of hex colors mapped to bivariate classes.
+#'   - `rgb_df`: A data frame with class identifiers and corresponding RGB values.
+#'
+#' @details The function creates a bivariate color palette compatible with biscale mapping.
+#'   The `pals` package provides various palettes that can be used to define `p_vec`.
+#'   See available palettes here: \url{https://cran.r-project.org/web/packages/pals/vignettes/pals_examples.html}.
+#'
+#' @examples
+#' p_vec <- c("#f7fbff", "#deebf7", "#c6dbef", "#9ecae1", "#6baed6", "#4292c6", "#2171b5", "#08519c", "#08306b")
+#' pals_bi_3(p_vec)
+#' pals_bi_3(p_vec, flip = TRUE)
+#'
+#' @export
+pals_bi_3 <- function(p_vec, flip = FALSE) {
+  if (length(p_vec) != 9) {
+    stop("p_vec must contain exactly 9 hex color codes.")
+  }
+  
+  if (flip) {
+    p_vec <- rev(p_vec)
+  }
+  
+  # Create biscale-compatible palette
+  biscale_pal <- setNames(p_vec, c("1-1", "2-1", "3-1", "1-2", "2-2", "3-2", "1-3", "2-3", "3-3"))
+  
+  # Create dataframe
+  class <- c(11, 12, 13, 21, 22, 23, 31, 32, 33)
+  rgb_list <- lapply(p_vec, hex_to_rgb)
+  rgb_df <- data.frame(class, do.call(rbind, rgb_list), stringsAsFactors = FALSE)
+  
+  return(list(biscale_pal = biscale_pal, rgb_df = rgb_df))
+}

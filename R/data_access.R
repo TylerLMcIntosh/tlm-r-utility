@@ -3,100 +3,65 @@
 
 #' Fetch Data from an ArcGIS REST API Endpoint with Pagination
 #'
-#' This function retrieves geojson data from an ArcGIS REST API endpoint using pagination. It supports fetching a specified
-#' number of entries or all available entries from the API endpoint. Written with ChatGPT 4o assistance.
+#' This function retrieves GeoJSON data from an ArcGIS REST API endpoint using pagination.
+#' It checks for valid content and stops if the server returns an error page.
 #'
 #' @param base_url A character string. The base URL of the ArcGIS REST API endpoint.
-#' @param query_params A list. Query parameters to be used in the API request. The list should contain the necessary
-#' parameters required by the API, such as `where`, `outFields`, and `f`.
-#' @param max_record An integer. The maximum number of records that can be fetched in a single API request. This value is
-#' usually defined by the ArcGIS REST API server limitations.
-#' @param n An integer or character. Specifies the total number of entries to fetch. If `"all"`, the function fetches
-#' all available records from the API. If an integer, it specifies the exact number of records to fetch.
-#' @param timeout An integer. The time in seconds to wait before timing out the request.
+#' @param query_params A list. Query parameters required by the API, such as `where`, `outFields`, and `f`.
+#' @param max_record An integer. Max records to fetch in a single request.
+#' @param n An integer or "all". Total records to fetch.
+#' @param timeout An integer. Request timeout in seconds.
 #'
-#' @return An `sf` object. A Simple Features (sf) object containing the fetched data.
-#' @import httr sf
-#' @examples
-#' \dontrun{
-#' base_url <- "https://example.com/arcgis/rest/services/your_service/FeatureServer/0/query"
-#' query_params <- list(where = "1=1", outFields = "*", f = "geojson")
-#' max_record <- 100
-#' n <- 500  # Can also be "all"
-#' result <- get.x.from.arcgis.rest.api(base_url, query_params, max_record, n)
-#' print(result)
-#' }
-#' @importFrom httr GET status_code content timeout
-#' @importFrom sf st_read
+#' @return An `sf` object of combined fetched features.
 #' @export
 access_data_get_x_from_arcgis_rest_api_geojson <- function(base_url, query_params, max_record, n, timeout) {
-  # Input validation
-  if (!is.character(base_url) || length(base_url) != 1) {
-    stop("Parameter 'base_url' must be a single character string.")
-  }
-  if (!is.list(query_params)) {
-    stop("Parameter 'query_params' must be a list.")
-  }
-  if (!is.numeric(max_record) || length(max_record) != 1 || max_record <= 0) {
-    stop("Parameter 'max_record' must be a positive integer.")
-  }
-  if (!is.numeric(timeout) || length(timeout) != 1 || timeout <= 0) {
-    stop("Parameter 'timeout' must be a positive integer.")
-  }
+  if (!is.character(base_url) || length(base_url) != 1) stop("Parameter 'base_url' must be a single character string.")
+  if (!is.list(query_params)) stop("Parameter 'query_params' must be a list.")
+  if (!is.numeric(max_record) || max_record <= 0) stop("Parameter 'max_record' must be a positive integer.")
+  if (!is.numeric(timeout) || timeout <= 0) stop("Parameter 'timeout' must be a positive integer.")
   
-  
-  # Initialize variables
   total_features <- list()
   offset <- 0
-  total_fetched <- 0  # Keep track of the total number of records fetched
+  total_fetched <- 0
+  fetch_all <- identical(n, "all")
   
-  # Determine the limit for fetching records
-  fetch_all <- FALSE
-  if (n == "all") {
-    fetch_all <- TRUE
-  } else if (!is.numeric(n) || n <= 0) {
+  if (!fetch_all && (!is.numeric(n) || n <= 0)) {
     stop("Parameter 'n' must be a positive integer or 'all'.")
   }
   
   repeat {
-    # Update the resultOffset parameter in query_params
     query_params$resultOffset <- offset
+    query_params$resultRecordCount <- max_record
     
-    # Make the GET request using the base URL and query parameters
     response <- httr::GET(url = base_url, query = query_params, httr::timeout(timeout))
     
-    # Check if the request was successful
-    if (httr::status_code(response) == 200) {
-      # Read the GeoJSON data directly into an sf object
-      data <- sf::st_read(httr::content(response, as = "text"), quiet = TRUE)
-      
-      # Append the data to the list of features
-      total_features <- append(total_features, list(data))
-      
-      # Update the total number of fetched records
-      total_fetched <- total_fetched + nrow(data)
-      
-      # Provide user feedback for long-running processes
-      cat(sprintf("Fetched %d records so far...\n", total_fetched))
-      
-      # Determine if we should stop fetching
-      if ((nrow(data) < max_record) || (!fetch_all && total_fetched >= n)) {
-        break
-      }
-      
-      # Increment the offset by the maximum number of records for the next page
-      offset <- offset + max_record
-    } else {
-      # Handle errors and provide meaningful messages
+    # Check for valid content type
+    resp_type <- httr::headers(response)[["content-type"]]
+    if (!grepl("geo\\+json|application/json", resp_type)) {
       error_message <- httr::content(response, "text", encoding = "UTF-8")
-      stop("Failed to fetch data: ", httr::status_code(response), " - ", error_message)
+      stop("Received non-GeoJSON content. Likely an error page:\n", substr(error_message, 1, 500))
     }
+    
+    # Attempt to read GeoJSON as sf
+    data <- tryCatch({
+      sf::st_read(httr::content(response, as = "text", encoding = "UTF-8"), quiet = TRUE)
+    }, error = function(e) {
+      stop("Failed to parse GeoJSON at offset ", offset, ": ", e$message)
+    })
+    
+    # Append and track
+    total_features <- append(total_features, list(data))
+    fetched_now <- nrow(data)
+    total_fetched <- total_fetched + fetched_now
+    cat(sprintf("Fetched %d records so far...\n", total_fetched))
+    
+    # Stop if fewer than max or we hit the user-defined limit
+    if (fetched_now < max_record || (!fetch_all && total_fetched >= n)) break
+    
+    offset <- offset + max_record
   }
   
-  # Combine all pages into one sf object
   all_data_sf <- do.call(rbind, total_features)
-  
-  # If n is not "all", limit the output to the first n records
   if (!fetch_all) {
     all_data_sf <- all_data_sf[1:min(n, nrow(all_data_sf)), ]
   }
@@ -106,6 +71,7 @@ access_data_get_x_from_arcgis_rest_api_geojson <- function(base_url, query_param
 
 
 
+# Specific datasets ----
 
 #' Access MTBS CONUS Polygons
 #'
@@ -176,6 +142,146 @@ access_data_welty_jeffries <- function(bbox_str, epsg_n, where_param = "1=1", ti
   return(welty)
 }
 
+# Social data ----
+
+#A function to access road data from OSM
+# PARAMETERS
+# aoi :: an area of interest as an sf object - roads will be accessed within the area plus a 1km buffer
+# Adapt function as necessary for filtering
+access_osm_roads <- function(aoi) {
+  roadsData <- osmdata::opq(bbox = sf::st_bbox(sf::st_transform(sf::st_buffer(aoi, 2000), 4326))) |>
+    osmdata::add_osm_feature(key = "highway",
+                             key_exact = FALSE,
+                             value_exact = FALSE,
+                             match_case = FALSE) |>
+    osmdata::osmdata_sf()
+  desiredColumns <- c("USFS", "highway", "access", "maintained", "motor_vehicle", "service", "smoothness", "surface", "tracktype")
+  roads <- roadsData$osm_lines |>
+    dplyr::select(dplyr::any_of(desiredColumns)) |>
+    dplyr::filter(highway != "path" | is.na(highway)) |> 
+    dplyr::filter(tracktype != "grade5" | is.na(tracktype)) |>
+    dplyr::filter(access != "private" | is.na(access)) |>
+    dplyr::mutate(group = 1) |>
+    group_by(group) |>
+    summarise(geometry = st_union(geometry)) |>
+    ungroup() |>
+    sf::st_transform(epsg) |>
+    sf::st_intersection(sf::st_buffer(aoi, 1000)) #clip to district of interest + 1km
+  
+  return(roads)
+}
+
+
+access_ynp_bear_management_areas <- function() {
+  # Write out the URL query
+  base_url <- "https://services1.arcgis.com/fBc8EJBxQRMcHlei/arcgis/rest/services/YELL_BEAR_MANAGEMENT_AREAS_public_viewview/FeatureServer/0/query"
+  query_params <- list(f = "json",
+                       where = "1=1",
+                       outFields = "*",
+                       returnGeometry = "true")
+  
+  # Request data
+  bma <- access_data_get_x_from_arcgis_rest_api_geojson(
+    base_url = base_url, 
+    query_params = query_params, 
+    max_record = 1000, 
+    n = "all", 
+    timeout = 600
+  )
+  
+  return(bma)
+  
+}
+
+# The ranger districts file is quite small, so it is accessed via VSI
+access_usfs_ranger_districts <- function() {
+  usfs_rds <- paste0(
+    "/vsizip/vsicurl/", #magic remote connection
+    "https://data.fs.usda.gov/geodata/edw/edw_resources/shp/S_USA.RangerDistrict.zip", #copied link to download location
+    "/S_USA.RangerDistrict.shp") |> #path inside zip file
+    sf::st_read()
+  return(usfs_rds)
+}
+
+
+# A function to access the US federal surface management agency polygon dataset
+# The function downloads and unzips a geodatabase rather than accessing via VSI since this layer is 
+# useful for visualization and field planning, as well as it being accessed multiple times
+access_us_sma <- function(dir_path, layer) {
+  
+  loc <- here::here(dir_path, "SMA_WM.gdb")
+  if(file.exists(loc)) {
+    sma <- sf::st_read(loc, layer = layer)
+  } else {
+    download_unzip_file(url = "https://blm-egis.maps.arcgis.com/sharing/rest/content/items/6bf2e737c59d4111be92420ee5ab0b46/data",
+                        extract_to = dir_path,
+                        keep_zip = FALSE)
+    sma <-  sf::st_read(loc, layer = layer)
+  }
+  return(sma)
+}
+
+access_us_sma_helper_show_layers <- function(dir_path) {
+  sf::st_layers(here::here(dir_path, "SMA_WM.gdb"))
+}
+
+access_us_wilderness <- function(dest_path = NA) {
+  if(is.na(dest_path)) {
+    wild <- paste0(
+      "/vsizip/vsicurl/", #magic remote connection
+      "https://data.fs.usda.gov/geodata/edw/edw_resources/shp/S_USA.Wilderness.zip", #copied link to download location
+      "/S_USA.Wilderness.shp") |> #path inside zip file
+      sf::st_read()
+  } else {
+    if(file.exists(dest_path)) {
+      wild <- sf::st_read(dest_path)
+    } else {
+      wild <- paste0(
+        "/vsizip/vsicurl/", #magic remote connection
+        "https://data.fs.usda.gov/geodata/edw/edw_resources/shp/S_USA.Wilderness.zip", #copied link to download location
+        "/S_USA.Wilderness.shp") |> #path inside zip file
+        sf::st_read()
+      sf::st_write(wild, dest_path)
+    }
+  }
+  return(wild)
+}
+
+
+# Queries the PADUS REST service for WSAs
+# PADUS interactive online: https://usgs.maps.arcgis.com/home/item.html?id=98fce3fb0c8241ce8847e9f7d0d212e9
+access_us_wilderness_study_areas <- function(dest_path = NA) {
+  if(is.na(dest_path)) {
+    query_params <- list(where = "DesTp_Desc='Wilderness Study Area'",
+                         outFields = "*",
+                         f = "json")
+    base_url = "https://services.arcgis.com/v01gqwM5QqNysAAi/ArcGIS/rest/services/PADUS_Protection_Status_by_GAP_Status_Code/FeatureServer/0/QUERY"
+    wsa <- access_data_get_x_from_arcgis_rest_api_geojson(base_url = base_url,
+                                                          query_params = query_params,
+                                                          max_record = 2000,
+                                                          n = "all",
+                                                          timeout = 500)
+  } else {
+    if(file.exists(dest_path)) {
+      wsa <- sf::st_read(dest_path)
+    } else {
+      query_params <- list(where = "DesTp_Desc='Wilderness Study Area'",
+                           outFields = "*",
+                           f = "json")
+      base_url = "https://services.arcgis.com/v01gqwM5QqNysAAi/ArcGIS/rest/services/PADUS_Protection_Status_by_GAP_Status_Code/FeatureServer/0/QUERY"
+      wsa <- access_data_get_x_from_arcgis_rest_api_geojson(base_url = base_url,
+                                                            query_params = query_params,
+                                                            max_record = 2000,
+                                                            n = "all",
+                                                            timeout = 500)
+      sf::st_write(wsa, dest_path)
+    }
+  }
+  return(wsa)
+}
+
+
+# EPA Ecoregions ----
 
 
 #' Access EPA Level I Ecoregions Data via VSI
@@ -251,6 +357,7 @@ access_data_epa_l2_ecoregions_vsi <- function() {
 }
 
 
+
 #' Access EPA Level III Ecoregions Data via VSI
 #'
 #' This function retrieves the U.S. EPA Level III ecoregions shapefile from a remote server via VSI (Virtual Spatial Infrastructure).
@@ -278,13 +385,14 @@ access_data_epa_l2_ecoregions_vsi <- function() {
 access_data_epa_l3_ecoregions_vsi <- function() {
   epa_l3 <- paste0(
     "/vsizip/vsicurl/",
-    "https://gaftp.epa.gov/EPADataCommons/ORD/Ecoregions/us/us_eco_l3.zip",
+    "https://dmap-prod-oms-edc.s3.us-east-1.amazonaws.com/ORD/Ecoregions/us/us_eco_l3.zip",
     "/us_eco_l3.shp"
   ) |>
     sf::st_read()
   
   return(epa_l3)
 }
+
 
 
 #' Access EPA Level IV Ecoregions Data via VSI
@@ -323,7 +431,73 @@ access_data_epa_l4_ecoregions_vsi <- function() {
 }
 
 
+# Landcover Data ----
 
+
+access_treemap <- function() {
+  treemap <- glue::glue(
+    "/vsizip/vsicurl/", #magic remote connection 
+    "https://s3-us-west-2.amazonaws.com/fs.usda.rds/RDS-2021-0074/RDS-2021-0074_Data.zip", #copied link to download location
+    "/Data/TreeMap2016.tif") |> #path inside zip file
+    terra::rast() 
+  return(treemap)
+}
+
+
+
+#' Access LANDFIRE EVT Raster for CONUS (2023)
+#'
+#' This function remotely accesses and reads the 2023 LANDFIRE Existing Vegetation Type (EVT) raster data for the contiguous United States (CONUS). The data is accessed directly from a zipped online source using GDAL's VSI (Virtual File System) protocol.
+#'
+#' @details
+#' The function utilizes GDAL's virtual file system (`/vsizip/vsicurl/`) to remotely access the LANDFIRE EVT raster file without needing to download or unzip it manually. The raster data is read into a `terra` raster object, suitable for geospatial analysis in R.
+#'
+#' @return
+#' A `terra` raster object containing the 2023 LANDFIRE EVT data for CONUS.
+#'
+#' @examples
+#' \dontrun{
+#' lf_evt <- access_landfire_evt_conus_2023()
+#' plot(lf_evt)
+#' }
+#' 
+#' @importFrom terra rast
+#' @export
+access_landfire_evt_conus_2023 <- function() {
+  lf_evt <- paste0(
+    "/vsizip/vsicurl/", #magic remote connection
+    "https://landfire.gov/data-downloads/US_240/LF2023_EVT_240_CONUS.zip", #copied link to download location
+    "/LF2023_EVT_240_CONUS/Tif/LC23_EVT_240.tif") |> #path inside zip file
+    terra::rast()
+  return(lf_evt)
+}
+
+#' Access LANDFIRE EVT CSV for CONUS (2023)
+#'
+#' This function remotely accesses and reads the 2023 LANDFIRE Existing Vegetation Type (EVT) CSV data for the contiguous United States (CONUS). The data is accessed directly from a zipped online source using GDAL's VSI (Virtual File System) protocol.
+#'
+#' @details
+#' This function uses GDAL's virtual file system (`/vsizip/vsicurl/`) to remotely access the LANDFIRE EVT CSV data without manual download or extraction. The CSV is read into an `sf` object using `sf::st_read()`, as GDAL's CSV handling is supported by spatial data functions. This method is necessary since standard R CSV readers do not natively support remote access via VSI.
+#'
+#' @return
+#' An `sf` object containing the CSV data from the 2023 LANDFIRE EVT for CONUS.
+#'
+#' @examples
+#' \dontrun{
+#' lf_evt_csv <- access_landfire_evt_conus_2023_csv()
+#' head(lf_evt_csv)
+#' }
+#' 
+#' @importFrom sf st_read
+#' @export
+access_landfire_evt_conus_2023_csv <- function() {
+  lf_evt_csv <- paste0(
+    "/vsizip/vsicurl/", #magic remote connection
+    "https://landfire.gov/data-downloads/US_240/LF2023_EVT_240_CONUS.zip", #copied link to download location
+    "/LF2023_EVT_240_CONUS/CSV_Data/LF23_EVT_240.csv") |> #path inside zip file
+    sf::st_read() #note that read_csv and other csv drivers in R don't talk to GDAL. Instead use st_read or terra::vect() to access CSV data in zip files
+  return(lf_evt_csv)
+}
 
 #' Access LCMS CONUS v2023.9 Data via VSI
 #'
@@ -636,6 +810,247 @@ access_data_lcmap_v13_stac_year_range <- function(earliest_year, latest_year, ao
   
   return(dats)
   
+}
+
+
+#' Download individual FIA data files by state and table
+#'
+#' This function downloads selected Forest Inventory and Analysis (FIA) CSV datasets
+#' for specified states and file suffixes (Oracle table names), placing them into
+#' a subdirectory named `fia_individual_data_files` within a target directory.
+#'
+#' Consider increasing the download timeout with `options(timeout = 300)` for large requests.
+#'
+#' @param state_abbreviations A character vector of state abbreviations (e.g., `c("CO", "WY")`).
+#' @param file_suffixes A character vector of FIA table names (e.g., `c("DWM_VISIT", "COUNTY")`).
+#' @param directory A string indicating the directory in which to store downloaded files.
+#'
+#' @return A character vector of full file paths for the downloaded files.
+#'
+#' @examples
+#' \dontrun{
+#' files <- fia_download_individual_data_files(
+#'   state_abbreviations = c("CO"),
+#'   file_suffixes = c("DWM_VISIT", "COUNTY"),
+#'   directory = "~/fia_data"
+#' )
+#' data_list <- lapply(files, readr::read_csv)
+#' names(data_list) <- basename(files)
+#' }
+#'
+#' @export
+fia_download_individual_data_files <- function(state_abbreviations, file_suffixes, directory) {
+  # Ensure the base directory exists
+  if (!dir.exists(directory)) {
+    dir.create(directory, recursive = TRUE)
+  }
+  
+  base_url <- "https://apps.fs.usda.gov/fia/datamart/CSV/"
+  subdirectory_path <- file.path(directory, "fia_individual_data_files")
+  
+  if (!dir.exists(subdirectory_path)) {
+    dir.create(subdirectory_path, recursive = TRUE)
+  }
+  
+  downloaded_files <- character()
+  
+  for (state in state_abbreviations) {
+    for (suffix in file_suffixes) {
+      url_suffix <- gsub("_", " ", suffix)
+      url_suffix <- gsub(" ", "_", toupper(url_suffix))  # Ensure uppercase with underscores
+      
+      file_url <- paste0(base_url, state, "_", url_suffix, ".csv")
+      file_path <- file.path(subdirectory_path, paste0(state, "_", suffix, ".csv"))
+      
+      tryCatch({
+        download.file(file_url, destfile = file_path, mode = "wb")
+        downloaded_files <- c(downloaded_files, file_path)
+        message("Downloaded: ", file_path)
+      }, error = function(e) {
+        message("Failed to download ", file_url, ": ", e$message)
+      })
+    }
+  }
+  
+  return(downloaded_files)
+}
+
+#' Download FIA bulk data sets by type and state
+#'
+#' This function bulk-downloads FIA datasets grouped by functional categories (e.g., "down woody material", "tree level").
+#' Files are downloaded into subdirectories within a main folder named `fia_bulk_data_files` inside the specified directory.
+#'
+#' Each returned list element corresponds to a bulk data type, containing a character vector of downloaded file paths.
+#'
+#' For large downloads, consider increasing the timeout: `options(timeout = 300)`
+#'
+#' @param state A character vector of state abbreviations (e.g., `c("CO", "WY")`).
+#' @param directory A string indicating the root directory for all downloads.
+#' @param bulk_data_types A character vector of FIA bulk data categories.
+#'        Supported types include: "location level", "tree level", "invasives and understory vegetation",
+#'        "down woody material", "tree regeneration", "ground cover", "soils", "population", "plot", "reference".
+#'
+#' @return A named list of character vectors. Each element contains file paths downloaded for one bulk data type.
+#'
+#' @examples
+#' \dontrun{
+#' downloaded <- fia_bulk_download_data_files(
+#'   state = c("CO"),
+#'   directory = "~/fia_data",
+#'   bulk_data_types = c("down woody material", "plot")
+#' )
+#' read_list <- lapply(downloaded$`down woody material`, readr::read_csv)
+#' names(read_list) <- basename(downloaded$`down woody material`)
+#' }
+#'
+#' @export
+fia_bulk_download_data_files <- function(state, directory, bulk_data_types) {
+  if (!dir.exists(directory)) {
+    dir.create(directory, recursive = TRUE)
+  }
+  
+  bulk_data_mappings <- list(
+    "down woody material" = c(
+      "DWM_VISIT", "DWM_COARSE_WOODY_DEBRIS", "DWM_DUFF_LITTER_FUEL",
+      "DWM_FINE_WOODY_DEBRIS", "DWM_MICROPLOT_FUEL", "DWM_RESIDUAL_PILE",
+      "DWM_TRANSECT_SEGMENT", "COND_DWM_CALC"
+    ),
+    "location level" = c("SURVEY", "PROJECT", "COUNTY", "PLOT", "COND", "SUBPLOT", "SUBP_COND", "SUBP_COND_CHNG_MTRX"),
+    "tree level" = c("TREE", "WOODLAND_STEMS", "GRM_COMPONENT", "GRM_THRESHOLD", "GRM_MIDPT", "GRM_BEGIN", "GRM_ESTN", "BEGINEND", "SEEDLING", "SITETREE"),
+    "invasives and understory vegetation" = c("INVASIVE_SUBPLOT_SPP", "P2VEG_SUBPLOT_SPP", "P2VEG_SUBP_STRUCTURE"),
+    "tree regeneration" = c("PLOT_REGEN", "SUBPLOT_REGEN", "SEEDLING_REGEN"),
+    "ground cover" = c("GRND_CVR", "GRND_LYR_FNCTL_GRP", "GRND_LYR_MICROQUAD"),
+    "soils" = c("SUBP_SOIL_SAMPLE_LOC", "SUBP_SOIL_SAMPLE_LAYER"),
+    "population" = c(
+      "POP_ESTN_UNIT", "POP_EVAL", "POP_EVAL_ATTRIBUTE", "POP_EVAL_GRP", "POP_EVAL_TYP",
+      "POP_PLOT_STRATUM_ASSGN", "POP_STRATUM"
+    ),
+    "plot" = c("PLOTGEOM", "PLOTSNAP"),
+    "reference" = c(
+      "REF_POP_ATTRIBUTE", "REF_POP_EVAL_TYP_DESCR", "REF_FOREST_TYPE", "REF_FOREST_TYPE_GROUP",
+      "REF_SPECIES", "REF_PLANT_DICTIONARY", "REF_SPECIES_GROUP", "REF_INVASIVE_SPECIES",
+      "REF_HABTYP_DESCRIPTION", "REF_HABTYP_PUBLICATION", "REF_CITATION", "REF_FIADB_VERSION",
+      "REF_STATE_ELEV", "REF_UNIT", "REF_RESEARCH_STATION", "REF_NVCS_HIERARCHY_STRICT",
+      "REF_NVCS_LEVEL_1_CODES", "REF_NVCS_LEVEL_2_CODES", "REF_NVCS_LEVEL_3_CODES",
+      "REF_NVCS_LEVEL_4_CODES", "REF_NVCS_LEVEL_5_CODES", "REF_NVCS_LEVEL_6_CODES",
+      "REF_NVCS_LEVEL_7_CODES", "REF_NVCS_LEVEL_8_CODES", "REF_AGENT", "REF_DAMAGE_AGENT",
+      "REF_DAMAGE_AGENT_GROUP", "REF_FVS_VAR_NAME", "REF_FVS_LOC_NAME", "REF_OWNGRP_CD",
+      "REF_DIFFERENCE_TEST_PER_ACRE", "REF_DIFFERENCE_TEST_TOTALS", "REF_EQUATION_TABLE",
+      "REF_SEQN", "REF_GRM_TYPE", "REF_INTL_TO_DOYLE_FACTOR", "REF_TREE_CARBON_RATIO_DEAD",
+      "REF_TREE_DECAY_PROP", "REF_TREE_STAND_DEAD_CR_PROP", "REF_GRND_LYR"
+    )
+  )
+  
+  all_downloaded_files <- setNames(vector("list", length(bulk_data_types)), bulk_data_types)
+  main_bulk_dir <- file.path(directory, "fia_bulk_data_files")
+  
+  if (!dir.exists(main_bulk_dir)) {
+    dir.create(main_bulk_dir, recursive = TRUE)
+  }
+  
+  for (bulk_data_type in bulk_data_types) {
+    if (!bulk_data_type %in% names(bulk_data_mappings)) {
+      stop("Unknown bulk data type: ", bulk_data_type)
+    }
+    
+    subdirectory <- gsub(" ", "_", bulk_data_type)
+    subdirectory_path <- file.path(main_bulk_dir, subdirectory)
+    
+    if (!dir.exists(subdirectory_path)) {
+      dir.create(subdirectory_path, recursive = TRUE)
+    }
+    
+    file_suffixes <- bulk_data_mappings[[bulk_data_type]]
+    
+    downloaded_files <- fia_download_individual_data_files(
+      state_abbreviations = state,
+      file_suffixes = file_suffixes,
+      directory = subdirectory_path
+    )
+    
+    all_downloaded_files[[bulk_data_type]] <- downloaded_files
+  }
+  
+  return(all_downloaded_files)
+}
+
+
+
+# NEON ----
+
+#' Access AOP Flight Box Data
+#'
+#' Retrieves the flight box shapefile data for all NEON AOP sites by downloading and reading
+#' it from the specified remote location.
+#'
+#' @return An sf object containing the flight box data for all NEON AOP sites.
+#'
+#' @importFrom sf st_read
+#' 
+#' @export
+access_neon_aop_flight_box_data <- function() {
+  aop_all <- paste0(
+    "/vsizip/vsicurl/", # Magic remote connection
+    "https://www.neonscience.org/sites/default/files/AOP_flightBoxes_0.zip", # Copied link to download location
+    "/AOP_flightBoxes/AOP_flightboxesAllSites.shp") |> # Path inside zip file
+    sf::st_read()
+  return(aop_all)
+}
+
+#' Access NEON Plot Shapefiles
+#'
+#' This function remotely accesses and reads the NEON plot shapefiles directly from a zipped online source using GDAL's VSI (Virtual File System) protocol.
+#' It downloads the shapefile for all NEON TOS (Tower Observation System) plots.
+#'
+#' @details
+#' This function uses a magic remote connection through GDAL's virtual file system (`/vsizip/vsicurl/`) to access the shapefile directly from the zipped NEON data repository. The function does not require the user to download or unzip the file manually. The shapefile is read into an `sf` object for further spatial analysis in R.
+#'
+#' @return
+#' An `sf` object containing the NEON TOS plot polygons.
+#'
+#' @examples
+#' \dontrun{
+#' neon_plots <- access_neon_plots_shp()
+#' plot(neon_plots)
+#' }
+#' 
+#' @importFrom sf st_read
+#' @export
+access_neon_plots_shp <- function() {
+  neon_plots <- paste0(
+    "/vsizip/vsicurl/", #magic remote connection
+    "https://www.neonscience.org/sites/default/files/All_NEON_TOS_Plots_V10.zip", #copied link to download location
+    "/All_NEON_TOS_Plots_V10/All_NEON_TOS_Plot_Polygons_V10.shp") |> #path inside zip file
+    sf::st_read()
+  return(neon_plots)
+}
+
+#' Access NEON Domain Shapefiles
+#'
+#' This function remotely accesses and reads the NEON domain shapefiles directly from a zipped online source using GDAL's VSI (Virtual File System) protocol.
+#' It downloads the shapefile for NEON's defined geographic domains.
+#'
+#' @details
+#' Similar to the `access_neon_plots_shp()` function, this function uses the GDAL virtual file system (`/vsizip/vsicurl/`) to access and read NEON domain shapefiles directly from a zipped source. The shapefile contains geographic domain boundaries for the NEON project, which is read into an `sf` object.
+#'
+#' @return
+#' An `sf` object containing the NEON domain polygons.
+#'
+#' @examples
+#' \dontrun{
+#' neon_domains <- access_neon_domains_shp()
+#' plot(neon_domains)
+#' }
+#' 
+#' @importFrom sf st_read
+#' @export
+access_neon_domains_shp <- function() {
+  neon_domains <- paste0(
+    "/vsizip/vsicurl/", #magic remote connection
+    "https://www.neonscience.org/sites/default/files/NEONDomains_0.zip", #copied link to download location
+    "/NEON_Domains.shp") |> #path inside zip file
+    sf::st_read()
+  return(neon_domains)
 }
 
 

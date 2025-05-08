@@ -53,3 +53,13 @@ test_future_function <- function(fun, n_cores = parallel::detectCores(), ...) {
     identical = output_identical
   ))
 }
+
+unwrap_to_sf <- function(obj) {
+  if (inherits(obj, "PackedSpatVector")) {
+    obj <- terra::unwrap(obj)
+  }
+  if (inherits(obj, "SpatVector")) {
+    obj <- sf::st_as_sf(obj)
+  }
+  return(obj)
+}
