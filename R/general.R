@@ -1,3 +1,6 @@
+
+# Basic Utility ----
+
 #' Generate a Timestamp
 #'
 #' This function generates a timestamp in the format "YYYY-MM-DD HH:MM:SS TZ", representing the current date and time along with the time zone.
@@ -139,6 +142,678 @@ hex_to_rgb <- function(hex) {
   if (any(is.na(c(r, g, b)))) stop("Failed to convert hex to RGB.")
   
   return(c(R = r, G = g, B = b))
+}
+
+
+
+
+
+
+
+
+
+
+#' Safely Extract a ZIP or TAR Archive
+#'
+#' Handles both .zip and .tar(.gz) files. Supports skipping if files/folders exist,
+#' recursive extraction of nested archives, and optional cleanup.
+#'
+#' @param archive_path Character. Path to a .zip, .tar, or .tar.gz file.
+#' @param extract_to Character. Directory for extraction. Defaults to archive's directory.
+#' @param recursive Logical. Recursively extract nested archives? Defaults to FALSE.
+#' @param keep_archive Logical. Keep original and nested archives after extraction? Defaults to TRUE.
+#' @param full_contents_check Logical. If TRUE, skip extraction only if all files exist.
+#' @param return_all_paths Logical. If TRUE, return all extracted file paths;
+#'                          if FALSE, return all top-level files and directories.
+#'
+#' @return Character vector of extracted paths.
+#' @export
+safe_extract <- function(archive_path,
+                         extract_to = dirname(archive_path),
+                         recursive = FALSE,
+                         keep_archive = TRUE,
+                         full_contents_check = FALSE,
+                         return_all_paths = FALSE) {
+  # --- Validate inputs ---
+  if (!file.exists(archive_path)) stop("Archive does not exist: ", archive_path)
+  if (!dir.exists(extract_to)) dir.create(extract_to, recursive = TRUE)
+  
+  ext <- tolower(tools::file_ext(archive_path))
+  is_zip <- ext == "zip"
+  is_tar <- ext %in% c("tar", "gz", "tgz", "tar.gz")
+  
+  if (!is_zip && !is_tar) stop("Unsupported archive type: ", ext)
+  
+  # --- List archive contents ---
+  contents <- if (is_zip) {
+    utils::unzip(archive_path, list = TRUE)$Name
+  } else {
+    utils::untar(archive_path, list = TRUE)
+  }
+  
+  # Determine top-level items
+  top_level_items <- unique(sub("^([^/]+).*", "\\1", contents))
+  top_level_paths <- file.path(extract_to, top_level_items)
+  
+  # --- Skip logic ---
+  skip_extract <- if (full_contents_check) {
+    all(file.exists(file.path(extract_to, contents)))
+  } else {
+    all(file.exists(top_level_paths))
+  }
+  
+  if (!skip_extract) {
+    tryCatch({
+      if (is_zip) {
+        unzip(archive_path, exdir = extract_to)
+      } else {
+        utils::untar(archive_path, exdir = extract_to)
+      }
+    }, error = function(e) stop("Extraction failed: ", e$message))
+    
+    # --- Recursive extraction ---
+    if (recursive) {
+      nested_archives <- list.files(extract_to, pattern = "\\.(zip|tar|gz|tgz)$", recursive = TRUE, full.names = TRUE)
+      nested_archives <- setdiff(nested_archives, archive_path)
+      for (na in nested_archives) {
+        safe_extract(na, dirname(na), recursive = recursive, keep_archive = keep_archive,
+                     full_contents_check = FALSE, return_all_paths = FALSE)
+        if (!keep_archive) unlink(na)
+      }
+    }
+    
+    if (!keep_archive) unlink(archive_path)
+  } else {
+    message("Skipping extract: Targets already exist in ", extract_to)
+  }
+  
+  # --- Return paths ---
+  if (return_all_paths) {
+    # Get full paths of extracted files
+    extracted_paths <- file.path(extract_to, contents)
+    extracted_files <- extracted_paths[file.exists(extracted_paths) & !file.info(extracted_paths)$isdir]
+    return(invisible(normalizePath(extracted_files, winslash = "/", mustWork = FALSE)))
+  } else {
+    paths <- file.path(extract_to, top_level_items)
+    return(invisible(normalizePath(paths[file.exists(paths)], winslash = "/", mustWork = FALSE)))
+  }
+}
+
+
+
+#' Safely Download a File to a Directory
+#'
+#' Downloads a file from a URL to a specified directory, only if it doesn't already exist there.
+#'
+#' @param url Character. The URL to download from.
+#' @param dest_dir Character. The directory where the file should be saved.
+#' @param mode Character. Mode passed to `download.file()`. Default is "wb" (write binary).
+#' @param timeout Integer. Optional timeout in seconds. Will be reset afterward.
+#'
+#' @return A character string with the full path to the downloaded file.
+#'
+#' @importFrom utils download.file
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' path <- safe_download("https://example.com/data.zip", "data/")
+#' }
+safe_download <- function(url,
+                          dest_dir,
+                          mode = "wb",
+                          timeout = NA) {
+  # Validate input
+  if (!is.character(url) || length(url) != 1) stop("`url` must be a single character string.")
+  if (!is.character(dest_dir) || length(dest_dir) != 1) stop("`dest_dir` must be a single character string.")
+  
+  # Ensure destination directory exists
+  if (!dir.exists(dest_dir)) dir.create(dest_dir, recursive = TRUE)
+  
+  # Derive destination file path from URL and directory
+  filename <- basename(url)
+  destfile <- file.path(dest_dir, filename)
+  
+  # Skip download if file already exists
+  if (file.exists(destfile)) {
+    message("Skipping download: File already exists at ", destfile)
+    return(normalizePath(destfile, winslash = "/", mustWork = FALSE))
+  }
+  
+  # Handle optional timeout
+  original_timeout <- getOption("timeout")
+  if (!is.na(timeout) && timeout > original_timeout) {
+    options(timeout = timeout)
+    on.exit(options(timeout = original_timeout), add = TRUE)
+  }
+  
+  # Attempt to download
+  tryCatch({
+    download.file(url, destfile, mode = mode)
+    message("Downloaded: ", destfile)
+  }, error = function(e) {
+    stop("Failed to download file from URL: ", e$message)
+  })
+  
+  return(normalizePath(destfile, winslash = "/", mustWork = FALSE))
+}
+
+
+
+#' Recursively List Full Directory Contents
+#'
+#' This function lists all files and subdirectories within a specified directory recursively, displaying the structure with indentation for subdirectories and files.
+#'
+#' @param dir_path A character string specifying the path to the directory whose contents should be listed.
+#' @param indent A character string used for indentation. This is mainly for internal recursive use and should not be manually set by the user.
+#' 
+#' @return No return value. The function prints the directory structure to the console, showing files and folders with indented formatting.
+#'
+#' @details 
+#' - The function prints each file and directory at the top level of `dir_path`. 
+#' - If a directory is encountered, it recursively lists the contents of the directory, applying additional indentation for nested levels.
+#' - Files are listed without a trailing slash, while directories are listed with a trailing `/` for clarity.
+#'
+#' @examples
+#' \dontrun{
+#' # List all contents of a directory
+#' list_full_directory_contents("path/to/directory")
+#' }
+list_full_directory_contents <- function(dir_path, indent = "") {
+  # Get all files and directories in the current directory
+  items <- list.files(dir_path, full.names = TRUE)
+  
+  for (item in items) {
+    # Check if the item is a directory
+    if (dir.exists(item)) {
+      # Print the directory with indentation
+      cat(indent, "- ", basename(item), "/\n", sep = "")
+      # Recursively list the contents of the directory
+      list_full_directory_contents(item, paste0(indent, "  "))
+    } else {
+      # Print the file with indentation
+      cat(indent, "- ", basename(item), "\n", sep = "")
+    }
+  }
+}
+
+
+
+
+write_session_info <- function(path) {
+  writeLines(capture.output(sessionInfo()), path)
+}
+
+
+#' Install and Load Required Packages Using pak
+#'
+#' This function ensures that the specified packages (from CRAN or GitHub) are installed and loaded.
+#' It uses the `pak` package for fast and reliable package installation, supporting versioned and GitHub installs.
+#' If any packages are missing, they are automatically installed without prompting the user.
+#'
+#' @param package_list A character vector of package specifications to check, install, and load.
+#' For CRAN packages, use names like `"dplyr"` or `"dplyr@1.1.4"`. For GitHub packages, use the
+#' `"username/repo"` format, optionally with a version or ref (e.g., `"hadley/ggplot2@main"`).
+#'
+#' @return No return value. The specified packages are installed (if missing) and loaded into the session.
+#'
+#' @details
+#' This function automatically installs the `pak` package if it is not available.
+#' It distinguishes between CRAN and GitHub packages based on the presence of a "/" in the string.
+#' It loads each package by extracting its base name from the specification.
+#'
+#' @examples
+#' \dontrun{
+#' install_and_load_packages(c("dplyr", "hadley/ggplot2", "data.table@1.14.2"))
+#' }
+#'
+#' @importFrom pak pkg_install
+#' @export
+install_and_load_packages <- function(package_list) {
+  # Ensure pak is available
+  if (!requireNamespace("pak", quietly = TRUE)) {
+    cat("The 'pak' package is required for fast installation of packages, installing now.\n")
+    install.packages("pak")
+  }
+  
+  # Helper: Extract base name of a package for require()
+  parse_pkg_name <- function(pkg) {
+    if (grepl("/", pkg)) {
+      sub("^.+/(.+?)(@.+)?$", "\\1", pkg)  # GitHub: extract repo name
+    } else {
+      sub("@.*$", "", pkg)  # CRAN: remove @version if present
+    }
+  }
+  
+  # Classify and separate packages
+  missing_pkgs <- c()
+  for (pkg in package_list) {
+    pkg_name <- parse_pkg_name(pkg)
+    if (!requireNamespace(pkg_name, quietly = TRUE)) {
+      missing_pkgs <- c(missing_pkgs, pkg)
+    }
+  }
+  
+  # Install missing ones (CRAN or GitHub), with version support
+  if (length(missing_pkgs) > 0) {
+    pak::pkg_install(missing_pkgs, upgrade = TRUE, ask = FALSE)
+  }
+  
+  # Load all packages
+  for (pkg in package_list) {
+    pkg_name <- parse_pkg_name(pkg)
+    success <- require(pkg_name, character.only = TRUE, quietly = TRUE)
+    if (!success) cat("Failed to load package:", pkg_name, "\n")
+  }
+  
+  cat("All specified packages installed and loaded.\n")
+}
+
+
+# Specialized functions ----
+
+#' Package Existing Data File(s) with Metadata into ZIP
+#'
+#' Copies one or more existing data files, creates a Markdown metadata file using provided column names and descriptions, and packages all into a ZIP archive.
+#'
+#' @param data_file_path Character string or vector of file paths (e.g., CSVs).
+#' @param column_names Character vector of column names.
+#' @param column_descriptions Character vector of column descriptions (same length as column_names).
+#' @param overall_description Overall dataset description.
+#' @param author Author name.
+#' @param github_repo GitHub repo URL.
+#' @param out_dir Output directory path.
+#' @param data_name_full Full dataset name for metadata.
+#' @param data_name_file Base filename for output (no extension).
+#'
+#' @return NULL. Writes metadata and zip file to disk.
+#'
+#' @importFrom zip zip
+package_with_metadata <- function(data_file_path, column_names, column_descriptions,
+                                  overall_description, author, github_repo,
+                                  out_dir, data_name_full, data_name_file) {
+  # Ensure data_file_path is a character vector
+  if (!is.character(data_file_path)) {
+    stop("data_file_path must be a character string or a character vector.")
+  }
+  
+  # Check that all specified files exist
+  missing_files <- data_file_path[!file.exists(data_file_path)]
+  if (length(missing_files) > 0) {
+    stop("The following files do not exist:\n", paste(missing_files, collapse = "\n"))
+  }
+  
+  stopifnot(length(column_names) == length(column_descriptions))
+  
+  # Create metadata table
+  df_metadata <- cbind(column_names, column_descriptions)
+  
+  # Create metadata markdown
+  meta_path <- file.path(out_dir, "metadata.md")
+  stamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")
+  
+  sink(meta_path)
+  cat("# Metadata for the ", data_name_full, " dataset\n")
+  cat(overall_description, "\n\n")
+  cat("## Information\n")
+  cat("Author: ", author, "\n")
+  cat("Date generated: ", stamp, "\n")
+  cat("[GitHub repo with code for reproduction](", github_repo, ")\n\n")
+  cat("## Metadata\n")
+  cat("column_names :: column_descriptions\n")
+  cat(apply(df_metadata, 1, paste, collapse = " :: "), sep = "\n")
+  sink()
+  
+  # Zip files
+  zip_path <- file.path(out_dir, paste0(data_name_file, ".zip"))
+  zip::zip(zipfile = zip_path,
+           files = c(data_file_path, meta_path),
+           mode = "cherry-pick")
+  
+  # Clean up temporary metadata file
+  file.remove(meta_path)
+}
+
+#' Export Data and Metadata to CSV and Markdown, then Zip
+#'
+#' Exports a data frame and its metadata to a CSV and Markdown file, then packages them in a ZIP archive.
+#'
+#' @param df A data frame to export.
+#' @param description Character vector of descriptions corresponding to each column (must match length of `columns`).
+#' @param overall_description Overall dataset description (string).
+#' @param author Author name (string).
+#' @param github_repo GitHub repo URL (string).
+#' @param out_dir Full path to output directory (string, e.g., from `here()`).
+#' @param df_name_full Dataset name to write in metadata.
+#' @param df_name_file Base name for output files (no extension).
+#'
+#' @return NULL. Writes files to disk and zips them.
+#'
+#' @importFrom zip zip
+#' @importFrom utils write.csv
+#'
+#' @note Be sure to include `zip` and `utils` in the `Imports` section of your DESCRIPTION file.
+export_df_with_metadata <- function(df, description,
+                                    overall_description, author, github_repo,
+                                    out_dir, df_name_full, df_name_file) {
+  
+  columns <- colnames(df)
+  stopifnot(length(columns) == length(description))
+  
+  # Create metadata table
+  df_metadata <- cbind(columns, description)
+  
+  # Write data CSV
+  dfFile <- file.path(out_dir, paste0(df_name_file, ".csv"))
+  write.csv(df, dfFile, row.names = FALSE)
+  
+  # Generate timestamp
+  stamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")
+  
+  # Write metadata Markdown file
+  metaFile <- file.path(out_dir, "metadata.md")
+  sink(metaFile)
+  cat("# Metadata for the ", df_name_full, " dataset\n")
+  cat(overall_description, "\n\n")
+  cat("## Information\n")
+  cat("Author: ", author, "\n")
+  cat("Date generated: ", stamp, "\n")
+  cat("[GitHub repo with code for reproduction](", github_repo, ")\n\n")
+  cat("## Metadata\n")
+  cat(paste0(colnames(df_metadata), collapse = ' :: '), "\n")
+  cat(apply(df_metadata, 1, paste, collapse = " :: "), sep = "\n")
+  sink()
+  
+  # Zip files
+  zipfile <- file.path(out_dir, paste0(df_name_file, ".zip"))
+  zip::zip(zipfile = zipfile,
+           files = c(dfFile, metaFile),
+           mode = "cherry-pick")
+  
+  # Clean up
+  file.remove(dfFile)
+  file.remove(metaFile)
+}
+
+
+# Function Description:
+#   The function create.qgis.style.for.paletted.raster.from.csv generates a QGIS style file (.qml) for raster layers, specifically formatted for paletted rasters. It uses styling information provided in a data frame (styleData), allowing users to define colors and labels for different raster values. The function supports hexadecimal (hex) and RGB color schemes.
+# 
+# Parameters:
+#   styleData: A data frame containing the styling information. The data frame should include the columns specified by valueColumn and labelColumn. For the hex color scheme, a color column is required. For RGB, columns R, G, and B are necessary.
+# outputQmlPath: A string specifying the file path where the generated QGIS style file (.qml) will be saved.
+# valueColumn: The name of the column in styleData that contains the raster values.
+# labelColumn: The name of the column in styleData that contains the labels for each raster value.
+# colorScheme: A string indicating the color scheme used in styleData. It can be "hex" for hexadecimal colors or "RGB" for separate red, green, and blue values. The default is "hex".
+# Functionality:
+#   The function iterates through each row of styleData, extracting the value, label, and color information to create palette entries in the QML file. For RGB color schemes, it converts the RGB values to hex using the rgb function. The function ensures proper XML formatting by escaping special characters in labels. After constructing the QML content, it is written to the specified output path.
+# 
+# Usage Example:
+# # Assuming styleData is pre-defined with the appropriate columns
+# create_qgis_style_for_paletted_raster_from_csv(styleData, "path/to/output.qml", "value", "label", "hex")
+# Citation:
+#   Function authored by R Code Stylist, GPT-4, OpenAI, in collaboration with the user.
+create_qgis_style_for_paletted_raster_from_csv <- function(styleData, outputQmlPath, valueColumn, labelColumn, colorScheme = "hex") {
+  
+  # Check for the necessary columns in the CSV based on the color scheme
+  if (!labelColumn %in% colnames(styleData)) {
+    stop("CSV file must contain the specified label column.")
+  }
+  
+  if (colorScheme == "hex" && !("color" %in% colnames(styleData))) {
+    stop("CSV file must contain a 'color' column for hex color scheme.")
+  } else if (colorScheme == "RGB" && !all(c("R", "G", "B") %in% colnames(styleData))) {
+    stop("CSV file must contain 'R', 'G', 'B' columns for RGB color scheme.")
+  }
+  
+  # Start creating the QML content
+  qmlContent <- '<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE qgis PUBLIC \'http://mrcc.com/qgis.dtd\' \'SYSTEM\'>
+<qgis hasScaleBasedVisibilityFlag="0" maxScale="0" version="3.22.12-Białowieża" styleCategories="AllStyleCategories" minScale="1e+08">
+   <flags>
+    <Identifiable>1</Identifiable>
+    <Removable>1</Removable>
+    <Searchable>1</Searchable>
+    <Private>0</Private>
+  </flags>
+  <temporal enabled="0" fetchMode="0" mode="0">
+    <fixedRange>
+      <start></start>
+      <end></end>
+    </fixedRange>
+  </temporal>
+  <customproperties>
+    <Option type="Map">
+      <Option value="false" type="bool" name="WMSBackgroundLayer"/>
+      <Option value="false" type="bool" name="WMSPublishDataSourceUrl"/>
+      <Option value="0" type="int" name="embeddedWidgets/count"/>
+      <Option value="Value" type="QString" name="identify/format"/>
+    </Option>
+  </customproperties>
+  <pipe-data-defined-properties>
+    <Option type="Map">
+      <Option value="" type="QString" name="name"/>
+      <Option name="properties"/>
+      <Option value="collection" type="QString" name="type"/>
+    </Option>
+  </pipe-data-defined-properties>
+  <pipe>
+    <provider>
+      <resampling enabled="false" zoomedInResamplingMethod="nearestNeighbour" zoomedOutResamplingMethod="nearestNeighbour" maxOversampling="2"/>
+    </provider>
+    <rasterrenderer opacity="1" nodataColor="" type="paletted" band="1" alphaBand="-1">
+      <rasterTransparency/>
+      <minMaxOrigin>
+        <limits>None</limits>
+        <extent>WholeRaster</extent>
+        <statAccuracy>Estimated</statAccuracy>
+        <cumulativeCutLower>0.02</cumulativeCutLower>
+        <cumulativeCutUpper>0.98</cumulativeCutUpper>
+        <stdDevFactor>2</stdDevFactor>
+      </minMaxOrigin>
+  <colorPalette>'  
+  # Append palette entries from the CSV data
+  for (i in 1:nrow(styleData)) {
+    # Determine the color based on the scheme
+    if (colorScheme == "hex") {
+      color <- styleData$color[i]
+    } else {
+      color <- rgb(red = styleData$R[i], green = styleData$G[i], blue = styleData$B[i], maxColorValue = 255)
+    }
+    
+    label <- styleData[[labelColumn]][i]
+    label <- gsub("&", "and", label)
+    label <- gsub('\\"', '', label)
+    value <- styleData[[valueColumn]][i]
+    
+    
+    qmlContent <- glue::glue('{qmlContent}
+             <paletteEntry value="{value}" label="{label}" alpha="255" color="{color}"/>'
+    )
+  }
+  
+  # Finalize the QML content with closing tags
+  qmlContent <- paste0(qmlContent, '\n      </colorPalette>
+          <colorramp type="randomcolors" name="[source]">
+        <Option/>
+      </colorramp>
+    </rasterrenderer>
+    <brightnesscontrast gamma="1" brightness="0" contrast="0"/>
+    <huesaturation grayscaleMode="0" colorizeOn="0" colorizeGreen="128" saturation="0" colorizeBlue="128" colorizeRed="255" colorizeStrength="100" invertColors="0"/>
+    <rasterresampler maxOversampling="2"/>
+    <resamplingStage>resamplingFilter</resamplingStage>
+  </pipe>
+  <blendMode>0</blendMode>
+</qgis>')
+  
+  # Write the QML content to a file
+  writeLines(qmlContent, outputQmlPath)
+  
+  print(qmlContent)
+  
+  return(paste("QGIS style file created at:", outputQmlPath))
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# DEPRECATED ----
+
+# REPLACED BY safe_extract
+#' Safe Unzip a File (with Optional Recursive Unzipping and ZIP Cleanup)
+#'
+#' Safely unzips a ZIP file to a specified directory. Supports skipping extraction if files or top-level folder already exist, recursive unzipping of nested ZIPs, and optional deletion of ZIP files.
+#'
+#' @param zip_path Character. Path to the local ZIP file.
+#' @param extract_to Character. Directory where the contents should be extracted. Defaults to the ZIP's directory.
+#' @param recursive Logical. If TRUE, recursively unzip nested ZIP files. Defaults to FALSE.
+#' @param keep_zip Logical. If FALSE, deletes the original ZIP and any nested ZIPs after unzipping. Defaults to TRUE.
+#' @param full_contents_check Logical. If TRUE, skip unzip only if all expected files exist. If FALSE (default), skip unzip if the top-level directory exists.
+#' @param return_all_paths Logical. If TRUE, returns full paths to all extracted files. If FALSE (default), returns only the top-level directory path.
+#'
+#' @return A character vector of extracted file paths (if \code{return_all_paths = TRUE}) or a single path to the top-level extracted directory (if \code{return_all_paths = FALSE}).
+#'
+#' @importFrom utils unzip
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' # Recursively unzip and delete all ZIPs, return full paths
+#' files <- safe_unzip("data/archive.zip", recursive = TRUE, keep_zip = FALSE, return_all_paths = TRUE)
+#'
+#' # Unzip only if top folder doesn't exist, return folder path
+#' folder <- safe_unzip("data/archive.zip", full_contents_check = FALSE, return_all_paths = FALSE)
+#' }
+safe_unzip <- function(zip_path,
+                       extract_to = dirname(zip_path),
+                       recursive = FALSE,
+                       keep_zip = TRUE,
+                       full_contents_check = FALSE,
+                       return_all_paths = FALSE) {
+  # Validate inputs
+  if (!file.exists(zip_path)) stop("ZIP file does not exist: ", zip_path)
+  if (!is.character(extract_to) || length(extract_to) != 1) stop("`extract_to` must be a single character string.")
+  if (!is.logical(recursive) || length(recursive) != 1) stop("`recursive` must be a single logical value.")
+  if (!is.logical(keep_zip) || length(keep_zip) != 1) stop("`keep_zip` must be a single logical value.")
+  if (!is.logical(full_contents_check) || length(full_contents_check) != 1) stop("`full_contents_check` must be logical.")
+  if (!is.logical(return_all_paths) || length(return_all_paths) != 1) stop("`return_all_paths` must be logical.")
+  
+  # Get ZIP listing and top-level directory
+  zip_listing <- unzip(zip_path, list = TRUE)
+  top_level_dirs <- unique(sub("/.*", "", zip_listing$Name))
+  top_dir_path <- file.path(extract_to, top_level_dirs[1])
+  
+  # Determine whether to skip unzip
+  skip_unzip <- FALSE
+  if (full_contents_check) {
+    expected_paths <- file.path(extract_to, zip_listing$Name)
+    skip_unzip <- all(file.exists(expected_paths))
+  } else {
+    skip_unzip <- dir.exists(top_dir_path)
+  }
+  
+  if (!skip_unzip) {
+    if (!dir.exists(extract_to)) dir.create(extract_to, recursive = TRUE)
+    tryCatch({
+      unzip(zip_path, exdir = extract_to)
+    }, error = function(e) {
+      stop("Failed to unzip: ", e$message)
+    })
+    
+    if (recursive) {
+      nested_zips <- list.files(extract_to, pattern = "\\.zip$", recursive = TRUE, full.names = TRUE)
+      for (nz in nested_zips) {
+        unzip(nz, exdir = dirname(nz))
+        if (!keep_zip) unlink(nz)
+      }
+    }
+    
+    if (!keep_zip) unlink(zip_path)
+  } else {
+    message("Skipping unzip: Extraction target(s) already exist in ", extract_to)
+  }
+  
+  if (return_all_paths) {
+    all_files <- list.files(extract_to, recursive = TRUE, full.names = TRUE)
+    file_paths <- all_files[file.info(all_files)$isdir == FALSE]
+    return(invisible(normalizePath(file_paths, winslash = "/", mustWork = FALSE)))
+  } else {
+    return(invisible(normalizePath(top_dir_path, winslash = "/", mustWork = FALSE)))
+  }
+}
+
+#' Unzip Files or All Zip Files in a Directory
+#'
+#' This function checks if the input is a zip file or a directory. If it's a specific zip file, it will unzip the file into a folder with the same name (excluding the `.zip` extension) if the folder does not already exist. If the input is a directory, it will locate all `.zip` files in that directory and unzip them into their respective folders, creating the folder if necessary.
+#'
+#' @param zip_location A character string representing either a path to a specific zip file or a directory containing zip files.
+#' 
+#' @return No return value. The function unzips files as needed and prints messages indicating whether files were unzipped or if the target folders already existed.
+#'
+#' @details 
+#' - If `zip_location` points to a zip file and the corresponding folder doesn't exist, the function will unzip the file into a new folder located in the same directory as the zip file.
+#' - If `zip_location` points to a directory, the function will iterate over all zip files in the directory, unzipping each into a folder named after the zip file (without the `.zip` extension).
+#' - If a folder with the same name as the zip file already exists, the function will skip unzipping that file.
+#' 
+#' @examples
+#' \dontrun{
+#' # Unzipping a specific file
+#' unzip_if_zipped("path/to/file.zip")
+#'
+#' # Unzipping all zip files in a directory
+#' unzip_if_zipped("path/to/directory")
+#' }
+#'
+#' @importFrom utils unzip
+unzip_if_zipped <- function(zip_location) {
+  # Check if the input is a specific zip file
+  if (file.exists(zip_location) && grepl("\\.zip$", zip_location)) {
+    # It's a specific zip file
+    folder_name <- sub("\\.zip$", "", basename(zip_location))
+    destination_path <- file.path(dirname(zip_location), folder_name)
+    
+    # Check if the corresponding folder already exists
+    if (!dir.exists(destination_path)) {
+      # Unzip the file into the new folder
+      unzip(zip_location, exdir = destination_path)
+      cat("Unzipped:", zip_location, "to", destination_path, "\n")
+    } else {
+      cat("Folder already exists:", destination_path, "\n")
+    }
+  } else if (dir.exists(zip_location)) {
+    # It's a directory, process all zip files in the directory
+    zip_files <- list.files(zip_location, pattern = "\\.zip$", full.names = TRUE)
+    
+    if (length(zip_files) == 0) {
+      cat("No zip files found in the directory:", zip_location, "\n")
+    } else {
+      for (zip_file in zip_files) {
+        folder_name <- sub("\\.zip$", "", basename(zip_file))
+        destination_path <- file.path(zip_location, folder_name)
+        
+        # Check if the corresponding folder already exists
+        if (!dir.exists(destination_path)) {
+          # Unzip the file into the new folder
+          unzip(zip_file, exdir = destination_path)
+          cat("Unzipped:", zip_file, "to", destination_path, "\n")
+        } else {
+          cat("Folder already exists:", destination_path, "\n")
+        }
+      }
+    }
+  } else {
+    cat("The provided path is neither a valid zip file nor a directory.\n")
+  }
 }
 
 
@@ -408,7 +1083,7 @@ install_and_load_packages <- function(package_list, auto_install = "n") {
 }
 
 
-install_and_load_packages <- function(package_list, auto_install = "n") {
+install_and_load_packages <- function(package_list) {
   # Ensure pak is available
   if (!requireNamespace("pak", quietly = TRUE)) {
     cat("The 'pak' package is required for fast installation of packages, installing now.\n")
@@ -450,439 +1125,3 @@ install_and_load_packages <- function(package_list, auto_install = "n") {
 
 
 
-#' Safe Unzip a File (with Optional Recursive Unzipping and ZIP Cleanup)
-#'
-#' Safely unzips a ZIP file to a specified directory, skipping if all expected contents already exist.
-#' Optionally removes the original and/or nested ZIP files after extraction.
-#'
-#' @param zip_path Character. Path to the local ZIP file.
-#' @param extract_to Character. Directory where the contents should be extracted. Defaults to the ZIP's directory.
-#' @param recursive Logical. If TRUE, recursively unzip nested ZIP files. Defaults to FALSE.
-#' @param keep_zip Logical. If FALSE, deletes the original ZIP and any nested ZIPs after unzipping. Defaults to TRUE.
-#'
-#' @return A character vector of full paths of the extracted files (excluding directories).
-#'
-#' @importFrom utils unzip
-#' @export
-#'
-#' @examples
-#' \dontrun{
-#' files <- safe_unzip("data/archive.zip", recursive = TRUE, keep_zip = FALSE)
-#' print(files)  # Only unzipped files, not folders
-#' }
-safe_unzip <- function(zip_path,
-                       extract_to = dirname(zip_path),
-                       recursive = FALSE,
-                       keep_zip = TRUE) {
-  # Validate inputs
-  if (!file.exists(zip_path)) stop("ZIP file does not exist: ", zip_path)
-  if (!is.character(extract_to) || length(extract_to) != 1) stop("`extract_to` must be a single character string.")
-  if (!is.logical(recursive) || length(recursive) != 1) stop("`recursive` must be a single logical value.")
-  if (!is.logical(keep_zip) || length(keep_zip) != 1) stop("`keep_zip` must be a single logical value.")
-  
-  # List expected files from the archive
-  zip_listing <- unzip(zip_path, list = TRUE)
-  expected_paths <- file.path(extract_to, zip_listing$Name)
-  
-  # Skip if already fully extracted
-  if (all(file.exists(expected_paths))) {
-    message("Skipping unzip: All expected files already exist in ", extract_to)
-    
-    # Get all unzipped files (excluding directories)
-    all_files <- list.files(extract_to, recursive = TRUE, full.names = TRUE)
-    file_paths <- all_files[file.info(all_files)$isdir == FALSE]
-    
-    return(normalizePath(file_paths, mustWork = FALSE))
-    
-  } else {
-    if (!dir.exists(extract_to)) dir.create(extract_to, recursive = TRUE)
-    tryCatch({
-      unzip(zip_path, exdir = extract_to)
-    }, error = function(e) {
-      stop("Failed to unzip: ", e$message)
-    })
-    
-    # Recursive unzip of nested ZIPs
-    if (recursive) {
-      nested_zips <- list.files(extract_to, pattern = "\\.zip$", recursive = TRUE, full.names = TRUE)
-      for (nz in nested_zips) {
-        unzip(nz, exdir = dirname(nz))
-        if (!keep_zip) unlink(nz)
-      }
-    }
-    
-    # Optionally remove original zip
-    if (!keep_zip) unlink(zip_path)
-    
-    # Get all unzipped files (excluding directories)
-    all_files <- list.files(extract_to, recursive = TRUE, full.names = TRUE)
-    file_paths <- all_files[file.info(all_files)$isdir == FALSE]
-    
-    return(normalizePath(file_paths, mustWork = FALSE))
-  }
-}
-
-
-
-#' Safely Download a File to a Directory
-#'
-#' Downloads a file from a URL to a specified directory, only if it doesn't already exist there.
-#'
-#' @param url Character. The URL to download from.
-#' @param dest_dir Character. The directory where the file should be saved.
-#' @param mode Character. Mode passed to `download.file()`. Default is "wb" (write binary).
-#' @param timeout Integer. Optional timeout in seconds. Will be reset afterward.
-#'
-#' @return A character string with the full path to the downloaded file.
-#'
-#' @importFrom utils download.file
-#' @export
-#'
-#' @examples
-#' \dontrun{
-#' path <- safe_download("https://example.com/data.zip", "data/")
-#' }
-safe_download <- function(url,
-                          dest_dir,
-                          mode = "wb",
-                          timeout = NA) {
-  # Validate input
-  if (!is.character(url) || length(url) != 1) stop("`url` must be a single character string.")
-  if (!is.character(dest_dir) || length(dest_dir) != 1) stop("`dest_dir` must be a single character string.")
-  
-  # Ensure destination directory exists
-  if (!dir.exists(dest_dir)) dir.create(dest_dir, recursive = TRUE)
-  
-  # Derive destination file path from URL and directory
-  filename <- basename(url)
-  destfile <- file.path(dest_dir, filename)
-  
-  # Skip download if file already exists
-  if (file.exists(destfile)) {
-    message("Skipping download: File already exists at ", destfile)
-    return(normalizePath(destfile, mustWork = FALSE))
-  }
-  
-  # Handle optional timeout
-  original_timeout <- getOption("timeout")
-  if (!is.na(timeout) && timeout > original_timeout) {
-    options(timeout = timeout)
-    on.exit(options(timeout = original_timeout), add = TRUE)
-  }
-  
-  # Attempt to download
-  tryCatch({
-    download.file(url, destfile, mode = mode)
-    message("Downloaded: ", destfile)
-  }, error = function(e) {
-    stop("Failed to download file from URL: ", e$message)
-  })
-  
-  return(normalizePath(destfile, mustWork = FALSE))
-}
-
-
-
-#' Recursively List Full Directory Contents
-#'
-#' This function lists all files and subdirectories within a specified directory recursively, displaying the structure with indentation for subdirectories and files.
-#'
-#' @param dir_path A character string specifying the path to the directory whose contents should be listed.
-#' @param indent A character string used for indentation. This is mainly for internal recursive use and should not be manually set by the user.
-#' 
-#' @return No return value. The function prints the directory structure to the console, showing files and folders with indented formatting.
-#'
-#' @details 
-#' - The function prints each file and directory at the top level of `dir_path`. 
-#' - If a directory is encountered, it recursively lists the contents of the directory, applying additional indentation for nested levels.
-#' - Files are listed without a trailing slash, while directories are listed with a trailing `/` for clarity.
-#'
-#' @examples
-#' \dontrun{
-#' # List all contents of a directory
-#' list_full_directory_contents("path/to/directory")
-#' }
-list_full_directory_contents <- function(dir_path, indent = "") {
-  # Get all files and directories in the current directory
-  items <- list.files(dir_path, full.names = TRUE)
-  
-  for (item in items) {
-    # Check if the item is a directory
-    if (dir.exists(item)) {
-      # Print the directory with indentation
-      cat(indent, "- ", basename(item), "/\n", sep = "")
-      # Recursively list the contents of the directory
-      list_full_directory_contents(item, paste0(indent, "  "))
-    } else {
-      # Print the file with indentation
-      cat(indent, "- ", basename(item), "\n", sep = "")
-    }
-  }
-}
-
-#' Unzip Files or All Zip Files in a Directory
-#'
-#' This function checks if the input is a zip file or a directory. If it's a specific zip file, it will unzip the file into a folder with the same name (excluding the `.zip` extension) if the folder does not already exist. If the input is a directory, it will locate all `.zip` files in that directory and unzip them into their respective folders, creating the folder if necessary.
-#'
-#' @param zip_location A character string representing either a path to a specific zip file or a directory containing zip files.
-#' 
-#' @return No return value. The function unzips files as needed and prints messages indicating whether files were unzipped or if the target folders already existed.
-#'
-#' @details 
-#' - If `zip_location` points to a zip file and the corresponding folder doesn't exist, the function will unzip the file into a new folder located in the same directory as the zip file.
-#' - If `zip_location` points to a directory, the function will iterate over all zip files in the directory, unzipping each into a folder named after the zip file (without the `.zip` extension).
-#' - If a folder with the same name as the zip file already exists, the function will skip unzipping that file.
-#' 
-#' @examples
-#' \dontrun{
-#' # Unzipping a specific file
-#' unzip_if_zipped("path/to/file.zip")
-#'
-#' # Unzipping all zip files in a directory
-#' unzip_if_zipped("path/to/directory")
-#' }
-#'
-#' @importFrom utils unzip
-unzip_if_zipped <- function(zip_location) {
-  # Check if the input is a specific zip file
-  if (file.exists(zip_location) && grepl("\\.zip$", zip_location)) {
-    # It's a specific zip file
-    folder_name <- sub("\\.zip$", "", basename(zip_location))
-    destination_path <- file.path(dirname(zip_location), folder_name)
-    
-    # Check if the corresponding folder already exists
-    if (!dir.exists(destination_path)) {
-      # Unzip the file into the new folder
-      unzip(zip_location, exdir = destination_path)
-      cat("Unzipped:", zip_location, "to", destination_path, "\n")
-    } else {
-      cat("Folder already exists:", destination_path, "\n")
-    }
-  } else if (dir.exists(zip_location)) {
-    # It's a directory, process all zip files in the directory
-    zip_files <- list.files(zip_location, pattern = "\\.zip$", full.names = TRUE)
-    
-    if (length(zip_files) == 0) {
-      cat("No zip files found in the directory:", zip_location, "\n")
-    } else {
-      for (zip_file in zip_files) {
-        folder_name <- sub("\\.zip$", "", basename(zip_file))
-        destination_path <- file.path(zip_location, folder_name)
-        
-        # Check if the corresponding folder already exists
-        if (!dir.exists(destination_path)) {
-          # Unzip the file into the new folder
-          unzip(zip_file, exdir = destination_path)
-          cat("Unzipped:", zip_file, "to", destination_path, "\n")
-        } else {
-          cat("Folder already exists:", destination_path, "\n")
-        }
-      }
-    }
-  } else {
-    cat("The provided path is neither a valid zip file nor a directory.\n")
-  }
-}
-
-#' Normalize Values to a [0,1] Scale
-#'
-#' This function rescales numeric values to a 0-to-1 range.
-#'
-#' @param x A numeric vector or raster object to be normalized.
-#'
-#' @return A numeric vector or raster with values normalized between 0 and 1.
-#'
-#' @examples
-#' normalize(c(10, 20, 30, 40))
-#' normalize(c(5, 15, NA, 25, 35))
-#'
-#' @export
-normalize <- function(x) (x - min(x[], na.rm = TRUE)) / (max(x[], na.rm = TRUE) - min(x[], na.rm = TRUE))
-
-
-
-# Function Description:
-#   The function create.qgis.style.for.paletted.raster.from.csv generates a QGIS style file (.qml) for raster layers, specifically formatted for paletted rasters. It uses styling information provided in a data frame (styleData), allowing users to define colors and labels for different raster values. The function supports hexadecimal (hex) and RGB color schemes.
-# 
-# Parameters:
-#   styleData: A data frame containing the styling information. The data frame should include the columns specified by valueColumn and labelColumn. For the hex color scheme, a color column is required. For RGB, columns R, G, and B are necessary.
-# outputQmlPath: A string specifying the file path where the generated QGIS style file (.qml) will be saved.
-# valueColumn: The name of the column in styleData that contains the raster values.
-# labelColumn: The name of the column in styleData that contains the labels for each raster value.
-# colorScheme: A string indicating the color scheme used in styleData. It can be "hex" for hexadecimal colors or "RGB" for separate red, green, and blue values. The default is "hex".
-# Functionality:
-#   The function iterates through each row of styleData, extracting the value, label, and color information to create palette entries in the QML file. For RGB color schemes, it converts the RGB values to hex using the rgb function. The function ensures proper XML formatting by escaping special characters in labels. After constructing the QML content, it is written to the specified output path.
-# 
-# Usage Example:
-# # Assuming styleData is pre-defined with the appropriate columns
-# create_qgis_style_for_paletted_raster_from_csv(styleData, "path/to/output.qml", "value", "label", "hex")
-# Citation:
-#   Function authored by R Code Stylist, GPT-4, OpenAI, in collaboration with the user.
-create_qgis_style_for_paletted_raster_from_csv <- function(styleData, outputQmlPath, valueColumn, labelColumn, colorScheme = "hex") {
-  
-  # Check for the necessary columns in the CSV based on the color scheme
-  if (!labelColumn %in% colnames(styleData)) {
-    stop("CSV file must contain the specified label column.")
-  }
-  
-  if (colorScheme == "hex" && !("color" %in% colnames(styleData))) {
-    stop("CSV file must contain a 'color' column for hex color scheme.")
-  } else if (colorScheme == "RGB" && !all(c("R", "G", "B") %in% colnames(styleData))) {
-    stop("CSV file must contain 'R', 'G', 'B' columns for RGB color scheme.")
-  }
-  
-  # Start creating the QML content
-  qmlContent <- '<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE qgis PUBLIC \'http://mrcc.com/qgis.dtd\' \'SYSTEM\'>
-<qgis hasScaleBasedVisibilityFlag="0" maxScale="0" version="3.22.12-Białowieża" styleCategories="AllStyleCategories" minScale="1e+08">
-   <flags>
-    <Identifiable>1</Identifiable>
-    <Removable>1</Removable>
-    <Searchable>1</Searchable>
-    <Private>0</Private>
-  </flags>
-  <temporal enabled="0" fetchMode="0" mode="0">
-    <fixedRange>
-      <start></start>
-      <end></end>
-    </fixedRange>
-  </temporal>
-  <customproperties>
-    <Option type="Map">
-      <Option value="false" type="bool" name="WMSBackgroundLayer"/>
-      <Option value="false" type="bool" name="WMSPublishDataSourceUrl"/>
-      <Option value="0" type="int" name="embeddedWidgets/count"/>
-      <Option value="Value" type="QString" name="identify/format"/>
-    </Option>
-  </customproperties>
-  <pipe-data-defined-properties>
-    <Option type="Map">
-      <Option value="" type="QString" name="name"/>
-      <Option name="properties"/>
-      <Option value="collection" type="QString" name="type"/>
-    </Option>
-  </pipe-data-defined-properties>
-  <pipe>
-    <provider>
-      <resampling enabled="false" zoomedInResamplingMethod="nearestNeighbour" zoomedOutResamplingMethod="nearestNeighbour" maxOversampling="2"/>
-    </provider>
-    <rasterrenderer opacity="1" nodataColor="" type="paletted" band="1" alphaBand="-1">
-      <rasterTransparency/>
-      <minMaxOrigin>
-        <limits>None</limits>
-        <extent>WholeRaster</extent>
-        <statAccuracy>Estimated</statAccuracy>
-        <cumulativeCutLower>0.02</cumulativeCutLower>
-        <cumulativeCutUpper>0.98</cumulativeCutUpper>
-        <stdDevFactor>2</stdDevFactor>
-      </minMaxOrigin>
-  <colorPalette>'  
-  # Append palette entries from the CSV data
-  for (i in 1:nrow(styleData)) {
-    # Determine the color based on the scheme
-    if (colorScheme == "hex") {
-      color <- styleData$color[i]
-    } else {
-      color <- rgb(red = styleData$R[i], green = styleData$G[i], blue = styleData$B[i], maxColorValue = 255)
-    }
-    
-    label <- styleData[[labelColumn]][i]
-    label <- gsub("&", "and", label)
-    label <- gsub('\\"', '', label)
-    value <- styleData[[valueColumn]][i]
-    
-    
-    qmlContent <- glue::glue('{qmlContent}
-             <paletteEntry value="{value}" label="{label}" alpha="255" color="{color}"/>'
-    )
-  }
-  
-  # Finalize the QML content with closing tags
-  qmlContent <- paste0(qmlContent, '\n      </colorPalette>
-          <colorramp type="randomcolors" name="[source]">
-        <Option/>
-      </colorramp>
-    </rasterrenderer>
-    <brightnesscontrast gamma="1" brightness="0" contrast="0"/>
-    <huesaturation grayscaleMode="0" colorizeOn="0" colorizeGreen="128" saturation="0" colorizeBlue="128" colorizeRed="255" colorizeStrength="100" invertColors="0"/>
-    <rasterresampler maxOversampling="2"/>
-    <resamplingStage>resamplingFilter</resamplingStage>
-  </pipe>
-  <blendMode>0</blendMode>
-</qgis>')
-  
-  # Write the QML content to a file
-  writeLines(qmlContent, outputQmlPath)
-  
-  print(qmlContent)
-  
-  return(paste("QGIS style file created at:", outputQmlPath))
-}
-
-
-write_session_info <- function(path) {
-  writeLines(capture.output(sessionInfo()), path)
-}
-
-
-
-#' Export Data and Metadata to CSV and Markdown, then Zip
-#'
-#' Exports a data frame and its metadata to a CSV and Markdown file, then packages them in a ZIP archive.
-#'
-#' @param df A data frame to export.
-#' @param description Character vector of descriptions corresponding to each column (must match length of `columns`).
-#' @param overall_description Overall dataset description (string).
-#' @param author Author name (string).
-#' @param github_repo GitHub repo URL (string).
-#' @param out_dir Full path to output directory (string, e.g., from `here()`).
-#' @param df_name_full Dataset name to write in metadata.
-#' @param df_name_file Base name for output files (no extension).
-#'
-#' @return NULL. Writes files to disk and zips them.
-#'
-#' @importFrom zip zip
-#' @importFrom utils write.csv
-#'
-#' @note Be sure to include `zip` and `utils` in the `Imports` section of your DESCRIPTION file.
-export_df_with_metadata <- function(df, description,
-                                    overall_description, author, github_repo,
-                                    out_dir, df_name_full, df_name_file) {
-  
-  columns <- colnames(df)
-  stopifnot(length(columns) == length(description))
-  
-  # Create metadata table
-  df_metadata <- cbind(columns, description)
-  
-  # Write data CSV
-  dfFile <- file.path(out_dir, paste0(df_name_file, ".csv"))
-  write.csv(df, dfFile, row.names = FALSE)
-  
-  # Generate timestamp
-  stamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")
-  
-  # Write metadata Markdown file
-  metaFile <- file.path(out_dir, "metadata.md")
-  sink(metaFile)
-  cat("# Metadata for the ", df_name_full, " dataset\n")
-  cat(overall_description, "\n\n")
-  cat("## Information\n")
-  cat("Author: ", author, "\n")
-  cat("Date generated: ", stamp, "\n")
-  cat("[GitHub repo with code for reproduction](", github_repo, ")\n\n")
-  cat("## Metadata\n")
-  cat(paste0(colnames(df_metadata), collapse = ' :: '), "\n")
-  cat(apply(df_metadata, 1, paste, collapse = " :: "), sep = "\n")
-  sink()
-  
-  # Zip files
-  zipfile <- file.path(out_dir, paste0(df_name_file, ".zip"))
-  zip::zip(zipfile = zipfile,
-           files = c(dfFile, metaFile),
-           mode = "cherry-pick")
-  
-  # Clean up
-  file.remove(dfFile)
-  file.remove(metaFile)
-}

@@ -1,3 +1,24 @@
+# General analysis ----
+
+
+#' Normalize Values to a [0,1] Scale
+#'
+#' This function rescales numeric values to a 0-to-1 range.
+#'
+#' @param x A numeric vector or raster object to be normalized.
+#'
+#' @return A numeric vector or raster with values normalized between 0 and 1.
+#'
+#' @examples
+#' normalize(c(10, 20, 30, 40))
+#' normalize(c(5, 15, NA, 25, 35))
+#'
+#' @export
+normalize <- function(x) {
+  return(x - min(x[], na.rm = TRUE)) / (max(x[], na.rm = TRUE) - min(x[], na.rm = TRUE))
+}
+
+
 
 # MBLM ----
 

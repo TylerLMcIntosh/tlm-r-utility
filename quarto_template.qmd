@@ -41,8 +41,8 @@ install_and_load_packages(c("sf",
 
 dir_raw <- here::here("data", "raw")
 dir_derived <- here::here("data", "derived")
-dir_ensure(dir_raw,
-           dir_derived)
+dir_ensure(c(dir_raw,
+           dir_derived))
 
 
 # Load data

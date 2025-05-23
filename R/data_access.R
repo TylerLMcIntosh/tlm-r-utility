@@ -1,5 +1,122 @@
 # ACCESS DATA FUNCTIONS ----
 
+# Data management ---- 
+
+#' Read CSV from Google Drive Path
+#'
+#' This function reads a CSV file directly from a specified Google Drive path using the `googledrive` package. It first retrieves the file using the provided path and then reads the content into a data frame.
+#'
+#' @param path A character string specifying the Google Drive path to the CSV file. The path can be a file ID, URL, or a full path to the file.
+#' @return A data frame containing the contents of the CSV file.
+#' @details The function uses the `googledrive` package to access Google Drive files. Ensure that you have authenticated with Google Drive using `googledrive::drive_auth()` before using this function.
+#' @examples
+#' \dontrun{
+#' # Example usage:
+#' csv_data <- access_data_read_csv_from_gdrive("your-file-id-or-url")
+#' head(csv_data)
+#' }
+#' @importFrom googledrive drive_get drive_read_string
+#' @export
+read_csv_from_gdrive <- function(path) {
+  # Retrieve the file metadata from Google Drive
+  f <- googledrive::drive_get(path)
+  
+  # Read the content of the file as a string and convert it to a data frame
+  csv <- f |>
+    googledrive::drive_read_string() %>%
+    read.csv(text = .)
+  
+  return(csv)
+}
+
+#' Download a file from Google Drive to a local directory
+#'
+#' This function downloads a file from a Google Drive path to a specified local path.
+#'
+#' @param gDrivePath A character string. The path or name of the file on Google Drive.
+#' @param localPath A character string. The local path where the file will be saved.
+#' @param overwrite A logical value indicating whether to overwrite the file if it already exists at the local path. Defaults to `TRUE`.
+#'
+#' @details This function retrieves a file's ID from Google Drive using the provided `gDrivePath` and downloads it to the local directory specified by `localPath`. The file will be overwritten if `overwrite` is set to `TRUE` (default).
+#' 
+#' @return The downloaded file will be saved to the specified `localPath`.
+#' 
+#' @note You must be authenticated with Google Drive via the `googledrive` package for this function to work.
+#' 
+#' @importFrom googledrive drive_get drive_download as_id
+#' 
+#' @examples
+#' \dontrun{
+#' # Example usage:
+#' download_data_from_gdrive("path/to/file/on/drive", "path/to/local/file.csv")
+#' }
+#' 
+#' @export
+download_data_from_gdrive <- function(gDrivePath, localPath) {
+  # Validate inputs
+  if (missing(gDrivePath) || missing(localPath)) {
+    stop("Both 'gDrivePath' and 'localPath' must be provided.")
+  }
+  if (!is.character(gDrivePath) || !nzchar(gDrivePath)) {
+    stop("'gDrivePath' must be a non-empty string.")
+  }
+  if (!is.character(localPath) || !nzchar(localPath)) {
+    stop("'localPath' must be a non-empty string.")
+  }
+  
+  # Retrieve file ID from GDrive
+  f <- googledrive::drive_get(gDrivePath)
+  id <- f$id
+  nm <- f$name
+  
+  googledrive::drive_download(googledrive::as_id(id), path = localPath, overwrite = TRUE)
+}
+
+#' Get an ArcGIS Online Token
+#'
+#' This function generates a token for accessing ArcGIS Online resources. 
+#' It prompts the user for their ArcGIS username and password and uses these 
+#' credentials to obtain a token via the ArcGIS REST API.
+#'
+#' @return A character string containing the ArcGIS Online token.
+#'
+#' @details 
+#' The function uses the ArcGIS REST API endpoint 
+#' (\url{https://www.arcgis.com/sharing/rest/generateToken}) to authenticate the 
+#' user and generate a token. The token can be used for subsequent API requests 
+#' to access ArcGIS Online resources. The function makes use of the `httr` 
+#' package for the HTTP POST request and the `askpass` package to securely 
+#' request the user's password.
+#'
+#' @importFrom httr POST content
+#' @importFrom askpass askpass
+#'
+#' @examples
+#' \dontrun{
+#' # Generate an ArcGIS Online token
+#' token <- get_arcgis_online_token()
+#' print(token)
+#' }
+#'
+#' @export
+get_arcgis_online_token <- function() {
+  username <- readline(prompt = "Enter your ArcGIS username: ")
+  password <- askpass::askpass(prompt = "Enter your ArcGIS password: ")
+  
+  response <- httr::POST(
+    url = "https://www.arcgis.com/sharing/rest/generateToken",
+    body = list(
+      username = username,
+      password = password,
+      referer = "https://www.arcgis.com",
+      f = "json"
+    )
+  )
+  
+  token <- httr::content(response)$token
+  return(token)
+}
+
 
 #' Fetch Data from an ArcGIS REST API Endpoint with Pagination
 #'
@@ -71,7 +188,7 @@ access_data_get_x_from_arcgis_rest_api_geojson <- function(base_url, query_param
 
 
 
-# Specific datasets ----
+# Fire datasets ----
 
 #' Access MTBS CONUS Polygons
 #'
@@ -1053,77 +1170,4 @@ access_neon_domains_shp <- function() {
   return(neon_domains)
 }
 
-
-
-# DATA MANAGEMENT FUNCTIONS ---- 
-
-#' Read CSV from Google Drive Path
-#'
-#' This function reads a CSV file directly from a specified Google Drive path using the `googledrive` package. It first retrieves the file using the provided path and then reads the content into a data frame.
-#'
-#' @param path A character string specifying the Google Drive path to the CSV file. The path can be a file ID, URL, or a full path to the file.
-#' @return A data frame containing the contents of the CSV file.
-#' @details The function uses the `googledrive` package to access Google Drive files. Ensure that you have authenticated with Google Drive using `googledrive::drive_auth()` before using this function.
-#' @examples
-#' \dontrun{
-#' # Example usage:
-#' csv_data <- access_data_read_csv_from_gdrive("your-file-id-or-url")
-#' head(csv_data)
-#' }
-#' @importFrom googledrive drive_get drive_read_string
-#' @export
-read_csv_from_gdrive <- function(path) {
-  # Retrieve the file metadata from Google Drive
-  f <- googledrive::drive_get(path)
-  
-  # Read the content of the file as a string and convert it to a data frame
-  csv <- f |>
-    googledrive::drive_read_string() %>%
-    read.csv(text = .)
-  
-  return(csv)
-}
-
-#' Download a file from Google Drive to a local directory
-#'
-#' This function downloads a file from a Google Drive path to a specified local path.
-#'
-#' @param gDrivePath A character string. The path or name of the file on Google Drive.
-#' @param localPath A character string. The local path where the file will be saved.
-#' @param overwrite A logical value indicating whether to overwrite the file if it already exists at the local path. Defaults to `TRUE`.
-#'
-#' @details This function retrieves a file's ID from Google Drive using the provided `gDrivePath` and downloads it to the local directory specified by `localPath`. The file will be overwritten if `overwrite` is set to `TRUE` (default).
-#' 
-#' @return The downloaded file will be saved to the specified `localPath`.
-#' 
-#' @note You must be authenticated with Google Drive via the `googledrive` package for this function to work.
-#' 
-#' @importFrom googledrive drive_get drive_download as_id
-#' 
-#' @examples
-#' \dontrun{
-#' # Example usage:
-#' download_data_from_gdrive("path/to/file/on/drive", "path/to/local/file.csv")
-#' }
-#' 
-#' @export
-download_data_from_gdrive <- function(gDrivePath, localPath) {
-  # Validate inputs
-  if (missing(gDrivePath) || missing(localPath)) {
-    stop("Both 'gDrivePath' and 'localPath' must be provided.")
-  }
-  if (!is.character(gDrivePath) || !nzchar(gDrivePath)) {
-    stop("'gDrivePath' must be a non-empty string.")
-  }
-  if (!is.character(localPath) || !nzchar(localPath)) {
-    stop("'localPath' must be a non-empty string.")
-  }
-  
-  # Retrieve file ID from GDrive
-  f <- googledrive::drive_get(gDrivePath)
-  id <- f$id
-  nm <- f$name
-  
-  googledrive::drive_download(googledrive::as_id(id), path = localPath, overwrite = TRUE)
-}
 

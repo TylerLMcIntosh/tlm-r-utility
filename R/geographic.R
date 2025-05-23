@@ -1,3 +1,7 @@
+
+# Vector operations ----
+
+
 #' Write Shapefile to a New Directory and Create a Zipped Version
 #'
 #' This function writes an `sf` object to a shapefile in a new, file-specific directory and optionally creates a zipped version of the shapefile.
@@ -96,93 +100,6 @@ st_bbox_str <- function(shp) {
   return(bbox_str)
 }
 
-#' Clip a raster to a vector with careful handling of projections
-#'
-#' This function clips a raster to the extent of a vector, ensuring that the
-#' raster and vector are in the same projection system. It supports raster and
-#' vector objects from both the `terra` and `raster` packages. If the input raster
-#' or vector is packed (for parallelized workflows), it will be unpacked before
-#' processing and optionally re-packed afterward. 
-#'
-#' @param raster A SpatRaster, PackedSpatRaster, RasterLayer, RasterStack, or RasterBrick object. 
-#'        The raster to be clipped.
-#' @param vector A SpatVector, PackedSpatVector, or sf object. The vector defining the clipping boundary.
-#' @param mask Logical. Should the raster be masked to the vector? Defaults to `FALSE`.
-#' @param verbose Logical. If `TRUE`, provides detailed output of the steps being performed.
-#'
-#' @return A raster object clipped to the vector's extent, returned in the same format as the input raster.
-#' @examples
-#' \dontrun{
-#' raster_obj <- terra::rast(system.file("ex/logo.tif", package = "terra"))
-#' vector_obj <- terra::vect(system.file("ex/logo.shp", package = "terra"))
-#' cropped_raster <- st_crop_careful_universal(raster_obj, vector_obj, mask = TRUE, verbose = TRUE)
-#' }
-#' @export
-#' @importFrom terra unwrap wrap crop mask crs same.crs
-#' @importFrom raster crs crop mask
-#' @importFrom sf st_as_sf st_crs st_transform
-
-st_crop_careful_universal <- function(raster, vector, mask = FALSE, verbose = FALSE) {
-  pack <- FALSE
-  
-  # Unpack if parallelized inputs (PackedSpatRaster)
-  if (inherits(raster, "PackedSpatRaster")) {
-    if (verbose) print("Unpacking raster...")
-    raster <- terra::unwrap(raster)
-    pack <- TRUE
-  }
-  if (inherits(vector, "PackedSpatVector")) {
-    if (verbose) print("Unpacking vector...")
-    vector <- sf::st_as_sf(terra::unwrap(vector))
-  }
-  
-  # Handle SpatVector by converting to sf if necessary
-  if (inherits(vector, "SpatVector")) {
-    vector <- sf::st_as_sf(vector)
-  }
-  
-  # Process for raster package objects (RasterLayer, RasterStack, RasterBrick)
-  if (inherits(raster, c("RasterLayer", "RasterStack", "RasterBrick"))) {
-    
-    # Check if CRS is different and reproject vector if needed
-    if (!raster::crs(vector) == raster::crs(raster)) {
-      if (verbose) print("Reprojecting vector to raster CRS...")
-      vector <- sf::st_transform(vector, raster::crs(raster))
-    } else {
-      if (verbose) print("Vector already in raster CRS")
-    }
-    
-    # Perform crop and optional masking
-    if (verbose) print("Clipping raster using vector...")
-    r <- raster::crop(raster, vector)
-    if (mask) {
-      if (verbose) print("Applying mask to raster...")
-      r <- raster::mask(r, vector)
-    }
-    return(r)
-    
-  } else {  # Process for terra package objects
-    
-    # Check if CRS is different and reproject vector if needed
-    if (!terra::same.crs(vector, raster)) {
-      if (verbose) print("Reprojecting vector to raster CRS...")
-      vector <- sf::st_transform(vector, terra::crs(raster))
-    } else {
-      if (verbose) print("Vector already in raster CRS")
-    }
-    
-    # Perform crop and optional masking
-    if (verbose) print("Clipping raster using vector...")
-    r <- terra::crop(raster, vector, mask = mask)
-    
-    # Repack if the input was packed
-    if (pack) {
-      if (verbose) print("Repacking raster...")
-      r <- terra::wrap(r)
-    }
-    return(r)
-  }
-}
 
 # This function takes in a set of polygons and returns the same set of polygons
 # with the area of the polygon added as a column called "st_area", in whatever units the polygon CRS is in
@@ -286,37 +203,6 @@ sf_to_polygon_list <- function(vectors, name_field) {
 
 
 
-#' Calculate landscape metrics and attach raster layer names
-#'
-#' This function wraps `landscapemetrics::calculate_lsm()` and appends the corresponding
-#' layer names from a multi-layer SpatRaster as a new column called `layer_name`.
-#'
-#' @param land A `SpatRaster` object (from the `terra` package), with one or more layers.
-#' @param ... Additional arguments passed to `landscapemetrics::calculate_lsm()`.
-#'
-#' @return A `data.frame` of landscape metrics with an additional column `layer_name` indicating the raster band.
-#'
-#' @examples
-#' \dontrun{
-#' library(landscapemetrics)
-#' land <- terra::rast(system.file("ex/logo.tif", package = "terra"))
-#' result <- calculate_lsm_with_names(land, level = "patch", what = "lsm_p_area")
-#' }
-#'
-#' @export
-calculate_lsm_with_names <- function(land, ...) {
-  if (!inherits(land, "SpatRaster")) {
-    stop("`land` must be a SpatRaster object.")
-  }
-  
-  out <- land |>
-    landscapemetrics::calculate_lsm(...) |>
-    dplyr::mutate(layer_name = names(land)[layer])
-  
-  return(out)
-}
-
-
 
 #' Test whether an object can be serialized and unserialized
 #'
@@ -385,66 +271,6 @@ find_nad83_utm_epsg <- function(polygon) {
 }
 
 
-#' Merge a List of Raster Files and Optionally Write to Disk
-#'
-#' Merges a list of raster files into a single raster object. The merged raster can either
-#' be saved to a specified file path or returned as an in-memory object.
-#'
-#' @param file_list Character vector. A list of file paths to the raster files to be merged.
-#' @param file_final_path Character. The file path where the merged raster will be saved if `write = TRUE`.
-#' @param datatype Character. The data type of the output raster. Defaults to `"INT2U"`.
-#' @param compress Logical. If `TRUE`, compresses the output file with DEFLATE compression when writing to disk. Defaults to `TRUE`.
-#' @param write Logical. If `TRUE`, writes the merged raster to `file_final_path`. If `FALSE`, returns the merged raster in memory. Defaults to `TRUE`.
-#'
-#' @return If `write = TRUE`, returns invisible `NULL` after writing to disk. If `write = FALSE`, returns the merged raster object.
-#'
-#' @details This function reads a list of raster files, merges them, and either writes the merged raster to a specified path
-#' or returns it in memory. Compression is available when writing to disk to reduce file size.
-#'
-#' @importFrom purrr map
-#' @importFrom terra rast sprc merge writeRaster
-#' @export
-#'
-#' @examples
-#' \dontrun{
-#' file_paths <- c("path/to/raster1.tif", "path/to/raster2.tif")
-#' # To write to disk
-#' merge_list_of_rasters(file_paths, "path/to/final_raster.tif", datatype = "FLT4S", compress = TRUE, write = TRUE)
-#' # To return in memory
-#' merged_raster <- merge_list_of_rasters(file_paths, write = FALSE)
-#' }
-merge_list_of_rasters <- function(file_list, file_final_path = NULL, datatype = "INT2U", compress = TRUE, write = TRUE) {
-  # Validate inputs
-  if (!is.character(file_list) || length(file_list) < 1) stop("`file_list` must be a non-empty character vector.")
-  if (write && (is.null(file_final_path) || !is.character(file_final_path) || length(file_final_path) != 1)) {
-    stop("When `write = TRUE`, `file_final_path` must be a single, non-null character string.")
-  }
-  if (!is.logical(compress) || length(compress) != 1) stop("`compress` must be a single logical value.")
-  if (!is.logical(write) || length(write) != 1) stop("`write` must be a single logical value.")
-  
-  # Load and merge the rasters
-  combined_rasters <- file_list |>
-    purrr::map(~ terra::rast(.x)) |>
-    terra::sprc() |>
-    terra::merge()
-  
-  # Write or return the merged raster
-  if (write) {
-    if (compress) {
-      terra::writeRaster(combined_rasters,
-                         file_final_path,
-                         datatype = datatype,
-                         gdal = c("COMPRESS=DEFLATE"))
-    } else {
-      terra::writeRaster(combined_rasters,
-                         file_final_path,
-                         datatype = datatype)
-    }
-    invisible(NULL)  # Return NULL after writing to disk
-  } else {
-    return(combined_rasters)  # Return the merged raster in memory
-  }
-}
 
 
 
@@ -549,50 +375,198 @@ buffer_to_half_diam <- function(poly, tolerance) {
 
 
 
-#' Get an ArcGIS Online Token
+
+
+
+
+
+# Raster operations ----
+
+
+#' Clip a raster to a vector with careful handling of projections
 #'
-#' This function generates a token for accessing ArcGIS Online resources. 
-#' It prompts the user for their ArcGIS username and password and uses these 
-#' credentials to obtain a token via the ArcGIS REST API.
+#' This function clips a raster to the extent of a vector, ensuring that the
+#' raster and vector are in the same projection system. It supports raster and
+#' vector objects from both the `terra` and `raster` packages. If the input raster
+#' or vector is packed (for parallelized workflows), it will be unpacked before
+#' processing and optionally re-packed afterward. 
 #'
-#' @return A character string containing the ArcGIS Online token.
+#' @param raster A SpatRaster, PackedSpatRaster, RasterLayer, RasterStack, or RasterBrick object. 
+#'        The raster to be clipped.
+#' @param vector A SpatVector, PackedSpatVector, or sf object. The vector defining the clipping boundary.
+#' @param mask Logical. Should the raster be masked to the vector? Defaults to `FALSE`.
+#' @param verbose Logical. If `TRUE`, provides detailed output of the steps being performed.
 #'
-#' @details 
-#' The function uses the ArcGIS REST API endpoint 
-#' (\url{https://www.arcgis.com/sharing/rest/generateToken}) to authenticate the 
-#' user and generate a token. The token can be used for subsequent API requests 
-#' to access ArcGIS Online resources. The function makes use of the `httr` 
-#' package for the HTTP POST request and the `askpass` package to securely 
-#' request the user's password.
+#' @return A raster object clipped to the vector's extent, returned in the same format as the input raster.
+#' @examples
+#' \dontrun{
+#' raster_obj <- terra::rast(system.file("ex/logo.tif", package = "terra"))
+#' vector_obj <- terra::vect(system.file("ex/logo.shp", package = "terra"))
+#' cropped_raster <- crop_careful_universal(raster_obj, vector_obj, mask = TRUE, verbose = TRUE)
+#' }
+#' @export
+#' @importFrom terra unwrap wrap crop mask crs same.crs
+#' @importFrom raster crs crop mask
+#' @importFrom sf st_as_sf st_crs st_transform
+
+crop_careful_universal <- function(raster, vector, mask = FALSE, verbose = FALSE) {
+  pack <- FALSE
+  
+  # Unpack if parallelized inputs (PackedSpatRaster)
+  if (inherits(raster, "PackedSpatRaster")) {
+    if (verbose) print("Unpacking raster...")
+    raster <- terra::unwrap(raster)
+    pack <- TRUE
+  }
+  if (inherits(vector, "PackedSpatVector")) {
+    if (verbose) print("Unpacking vector...")
+    vector <- sf::st_as_sf(terra::unwrap(vector))
+  }
+  
+  # Handle SpatVector by converting to sf if necessary
+  if (inherits(vector, "SpatVector")) {
+    vector <- sf::st_as_sf(vector)
+  }
+  
+  # Process for raster package objects (RasterLayer, RasterStack, RasterBrick)
+  if (inherits(raster, c("RasterLayer", "RasterStack", "RasterBrick"))) {
+    
+    # Check if CRS is different and reproject vector if needed
+    if (!raster::crs(vector) == raster::crs(raster)) {
+      if (verbose) print("Reprojecting vector to raster CRS...")
+      vector <- sf::st_transform(vector, raster::crs(raster))
+    } else {
+      if (verbose) print("Vector already in raster CRS")
+    }
+    
+    # Perform crop and optional masking
+    if (verbose) print("Clipping raster using vector...")
+    r <- raster::crop(raster, vector)
+    if (mask) {
+      if (verbose) print("Applying mask to raster...")
+      r <- raster::mask(r, vector)
+    }
+    return(r)
+    
+  } else {  # Process for terra package objects
+    
+    # Check if CRS is different and reproject vector if needed
+    if (!terra::same.crs(vector, raster)) {
+      if (verbose) print("Reprojecting vector to raster CRS...")
+      vector <- sf::st_transform(vector, terra::crs(raster))
+    } else {
+      if (verbose) print("Vector already in raster CRS")
+    }
+    
+    # Perform crop and optional masking
+    if (verbose) print("Clipping raster using vector...")
+    r <- terra::crop(raster, vector, mask = mask)
+    
+    # Repack if the input was packed
+    if (pack) {
+      if (verbose) print("Repacking raster...")
+      r <- terra::wrap(r)
+    }
+    return(r)
+  }
+}
+
+
+#' Merge a List of Raster Files and Optionally Write to Disk
 #'
-#' @importFrom httr POST content
-#' @importFrom askpass askpass
+#' Merges a list of raster files into a single raster object. The merged raster can either
+#' be saved to a specified file path or returned as an in-memory object.
+#'
+#' @param file_list Character vector. A list of file paths to the raster files to be merged.
+#' @param file_final_path Character. The file path where the merged raster will be saved if `write = TRUE`.
+#' @param datatype Character. The data type of the output raster. Defaults to `"INT2U"`.
+#' @param compress Logical. If `TRUE`, compresses the output file with DEFLATE compression when writing to disk. Defaults to `TRUE`.
+#' @param write Logical. If `TRUE`, writes the merged raster to `file_final_path`. If `FALSE`, returns the merged raster in memory. Defaults to `TRUE`.
+#'
+#' @return If `write = TRUE`, returns invisible `NULL` after writing to disk. If `write = FALSE`, returns the merged raster object.
+#'
+#' @details This function reads a list of raster files, merges them, and either writes the merged raster to a specified path
+#' or returns it in memory. Compression is available when writing to disk to reduce file size.
+#'
+#' @importFrom purrr map
+#' @importFrom terra rast sprc merge writeRaster
+#' @export
 #'
 #' @examples
 #' \dontrun{
-#' # Generate an ArcGIS Online token
-#' token <- get_arcgis_online_token()
-#' print(token)
+#' file_paths <- c("path/to/raster1.tif", "path/to/raster2.tif")
+#' # To write to disk
+#' merge_list_of_rasters(file_paths, "path/to/final_raster.tif", datatype = "FLT4S", compress = TRUE, write = TRUE)
+#' # To return in memory
+#' merged_raster <- merge_list_of_rasters(file_paths, write = FALSE)
+#' }
+merge_list_of_rasters <- function(file_list, file_final_path = NULL, datatype = "INT2U", compress = TRUE, write = TRUE) {
+  # Validate inputs
+  if (!is.character(file_list) || length(file_list) < 1) stop("`file_list` must be a non-empty character vector.")
+  if (write && (is.null(file_final_path) || !is.character(file_final_path) || length(file_final_path) != 1)) {
+    stop("When `write = TRUE`, `file_final_path` must be a single, non-null character string.")
+  }
+  if (!is.logical(compress) || length(compress) != 1) stop("`compress` must be a single logical value.")
+  if (!is.logical(write) || length(write) != 1) stop("`write` must be a single logical value.")
+  
+  # Load and merge the rasters
+  combined_rasters <- file_list |>
+    purrr::map(~ terra::rast(.x)) |>
+    terra::sprc() |>
+    terra::merge()
+  
+  # Write or return the merged raster
+  if (write) {
+    if (compress) {
+      terra::writeRaster(combined_rasters,
+                         file_final_path,
+                         datatype = datatype,
+                         gdal = c("COMPRESS=DEFLATE"))
+    } else {
+      terra::writeRaster(combined_rasters,
+                         file_final_path,
+                         datatype = datatype)
+    }
+    invisible(NULL)  # Return NULL after writing to disk
+  } else {
+    return(combined_rasters)  # Return the merged raster in memory
+  }
+}
+
+# Specialized functions ----
+
+
+
+#' Calculate landscape metrics and attach raster layer names
+#'
+#' This function wraps `landscapemetrics::calculate_lsm()` and appends the corresponding
+#' layer names from a multi-layer SpatRaster as a new column called `layer_name`.
+#'
+#' @param land A `SpatRaster` object (from the `terra` package), with one or more layers.
+#' @param ... Additional arguments passed to `landscapemetrics::calculate_lsm()`.
+#'
+#' @return A `data.frame` of landscape metrics with an additional column `layer_name` indicating the raster band.
+#'
+#' @examples
+#' \dontrun{
+#' library(landscapemetrics)
+#' land <- terra::rast(system.file("ex/logo.tif", package = "terra"))
+#' result <- calculate_lsm_with_names(land, level = "patch", what = "lsm_p_area")
 #' }
 #'
 #' @export
-get_arcgis_online_token <- function() {
-  username <- readline(prompt = "Enter your ArcGIS username: ")
-  password <- askpass::askpass(prompt = "Enter your ArcGIS password: ")
+calculate_lsm_with_names <- function(land, ...) {
+  if (!inherits(land, "SpatRaster")) {
+    stop("`land` must be a SpatRaster object.")
+  }
   
-  response <- httr::POST(
-    url = "https://www.arcgis.com/sharing/rest/generateToken",
-    body = list(
-      username = username,
-      password = password,
-      referer = "https://www.arcgis.com",
-      f = "json"
-    )
-  )
+  out <- land |>
+    landscapemetrics::calculate_lsm(...) |>
+    dplyr::mutate(layer_name = names(land)[layer])
   
-  token <- httr::content(response)$token
-  return(token)
+  return(out)
 }
+
 
 
 #' Extract Topographic Features for an sf Object
@@ -695,55 +669,6 @@ extract_topo <- function(sf_set,
   return(sf_set_plus)
 }
 
-#Function to separate a vector file (e.g. shp or kml) into its component parts
-#Vectors should be a set of spatial features
-#nmField is the name of the field to use as feature names (e.g. "plotNm"). If left out, will use integers
-separate_vector <- function(vectors, nmField = NULL) {
-  out <- list()
-  for (i in 1:nrow(vectors)) {
-    vec <- vectors[i,]
-    if (is.null(nmField)) {
-      nm <- paste("feature", i, sep="")
-      out[[nm]] <- vec
-    } else {
-      nm <- vec %>% 
-        st_drop_geometry() %>% 
-        select({{nmField}}) %>% 
-        as.character()
-      out[[nm]] <- vec
-    }
-  }
-  return(out)
-}
 
-#Function to export a list of vectors (i.e. export output from separate_vector)
-#It will be export in a new directory (setNm), with file names of structure
-#"[setNm]_[nmField used in separate_vector][fileType]"
-#Input should be the output from separate.vector
-#outDir is the location to output files
-#setNm is the name of the vector set to output (e.g. "SnakingTransects2023")
-#fileType is either ".shp", ".gpkg", ".kml", or "dji.kml"
-export_separate_vector <- function(input, outDir, setNm, fileType) {
-  #Create subdirectory
-  outDir <- here::here(outDir, setNm)
-  if (!dir.exists(outDir)){
-    print(paste('Creating new output directory: ', outDir))
-    dir.create(outDir)
-  }
-  #Export
-  if (fileType == 'dji.kml') {
-    for (i in 1:length(input)) {
-      outFlNm <- paste(setNm, "_", names(input)[i], ".kml", sep="")
-      write.dji.kml(sfObj = input[[i]],
-                    fileNm = outFlNm,
-                    outDir = outDir)
-    }
-  } else {
-    for (i in 1:length(input)) {
-      outFlNm <- paste(setNm, "_", names(input)[i], fileType, sep="")
-      sf::st_write(input[[i]],
-                   here::here(outDir, outFlNm),
-                   append = FALSE)
-    }
-  }
-}
+
+
