@@ -3,16 +3,25 @@
 
 #' Generate a Timestamp
 #'
-#' This function generates a timestamp in the format "YYYY-MM-DD HH:MM:SS TZ", representing the current date and time along with the time zone.
+#' This function generates a timestamp in various formats representing the current date and time along with the time zone.
 #'
-#' @return A character string representing the current date and time in the format "YYYY-MM-DD HH:MM:SS TZ".
+#' @param type Either 'human_read' or 'for_file'
+#' @return A character string representing the current date and time in the selected
 #' @examples
 #' # Generate a timestamp
 #' timestamp()
 #'
 #' @export
-timestamp <- function(){
-  return(format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"))
+timestamp <- function(type = 'human_read'){
+  if(type == 'human_read') {
+    t <- format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")    
+  }
+  if(type == 'for_file') {
+    t <- format(Sys.time(), "%Y%m%d%H%M%S")
+  }
+
+  
+  return(t)
 }
 
 

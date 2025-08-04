@@ -18,6 +18,147 @@ normalize <- function(x) {
   return(x - min(x[], na.rm = TRUE)) / (max(x[], na.rm = TRUE) - min(x[], na.rm = TRUE))
 }
 
+#' Scatterplot with Linear Model and Summary Statistics using ggplot2
+#'
+#' Generates a scatterplot of two numeric variables with a fitted linear regression line.
+#' Displays the R-squared and p-value in the plot caption.
+#'
+#' @param data A data frame containing the variables to be plotted.
+#' @param x A character string naming the predictor (x-axis) variable. Must be numeric.
+#' @param y A character string naming the response (y-axis) variable. Must be numeric.
+#' @param filename Optional. A file name to which the plot will be saved. If \code{NULL}, the plot is not saved. Defaults to \code{NULL}. 
+#'
+#' @details
+#' This function checks that the provided variables exist in the data frame and are numeric.
+#' It fits a linear model of \code{y ~ x} using \code{lm()}, extracts the R-squared and p-value 
+#' from the model summary, and includes them as a caption in the resulting ggplot2-based scatterplot.
+#'
+#' The function uses \code{ggplot2::geom_smooth()} to plot the linear regression line with 
+#' a 95% confidence band.
+#'
+#' @return A \code{ggplot} object representing the scatterplot with the fitted linear model.
+#'
+#' @importFrom ggplot2 ggplot aes_string geom_point geom_smooth labs theme_minimal
+#' @importFrom stats lm as.formula
+#' @export
+plot_lm_ggplot <- function(data, x, y, filename = NULL) {
+  # Error checking
+  if (!x %in% names(data)) stop("Variable 'x' not found in data.")
+  if (!y %in% names(data)) stop("Variable 'y' not found in data.")
+  if (!is.numeric(data[[x]]) || !is.numeric(data[[y]])) {
+    stop("Both x and y must be numeric variables.")
+  }
+  
+  # Fit linear model
+  formula <- as.formula(paste(y, "~", x))
+  model <- lm(formula, data = data)
+  model_summary <- summary(model)
+  
+  # Extract R-squared and p-value
+  r_squared <- round(model_summary$r.squared, 4)
+  p_value <- round(coef(model_summary)[2, 4], 4)
+  caption_text <- paste0("R² = ", r_squared, ", p-value = ", p_value)
+  
+  # Generate plot
+  p <- ggplot(data, aes_string(x = x, y = y)) +
+    geom_point(color = "steelblue", alpha = 0.7) +
+    geom_smooth(method = "lm", se = TRUE, fill = "purple", color = "darkblue") +
+    labs(
+      title = paste("Linear Model:", y, "vs", x),
+      x = x,
+      y = y,
+      caption = caption_text
+    ) +
+    theme_minimal()
+  
+  if(!is.null(filename)) {
+    ggsave(filename = filename,
+           plot = p)
+    
+  }
+  return(p)
+}
+
+
+
+#' Improved Correlation Plot with Significance Testing
+#'
+#' Creates a correlation matrix plot using Pearson's r, displaying only statistically 
+#' significant correlations. Supports saving to file and custom graphical parameters.
+#'
+#' @param df A data frame containing the variables to be correlated.
+#' @param variables A character vector of column names in \code{df} to include in the correlation plot.
+#' @param title A character string for the main title of the plot. Defaults to \code{"Correlations"}.
+#' @param filename Optional. A file name to which the plot will be saved as a PNG. If \code{NULL}, the plot is not saved. Defaults to \code{NULL}.
+#' @param units A character string specifying the units for the image dimensions if saving to file. Defaults to \code{"px"}.
+#' @param width Width of the image in pixels (or other units). Defaults to \code{900}.
+#' @param height Height of the image in pixels (or other units). Defaults to \code{900}.
+#' @param ... Additional arguments passed to \code{corrplot::corrplot()}.
+#'
+#' @details
+#' This function computes pairwise Pearson correlations and corresponding p-values using 
+#' \code{Hmisc::rcorr}. It then plots the upper triangle of the correlation matrix using 
+#' \code{corrplot::corrplot}, displaying only statistically significant correlations 
+#' (p <= 0.05) and blanking out non-significant ones.
+#'
+#' If a filename is provided, the plot is saved as a PNG file using the specified dimensions.
+#'
+#' @return A correlation plot is displayed or saved. The function does not return an R object.
+#'
+#' @importFrom Hmisc rcorr
+#' @importFrom corrplot corrplot
+#' @export
+corrplot_improved <- function(df, variables, title = "Correlations", 
+                              filename = NULL, units = "px", 
+                              width = 900, height = 900, ...) {
+  # Load required packages
+  if (!requireNamespace("Hmisc", quietly = TRUE) ||
+      !requireNamespace("corrplot", quietly = TRUE)) {
+    stop("Packages 'Hmisc' and 'corrplot' are required.")
+  }
+  
+  # Validate input
+  if (!all(variables %in% names(df))) {
+    missing_vars <- setdiff(variables, names(df))
+    stop("The following variables are not in the dataframe: ", 
+         paste(missing_vars, collapse = ", "))
+  }
+  
+  # Check all variables are numeric
+  if (!all(sapply(df[variables], is.numeric))) {
+    non_numeric <- variables[!sapply(df[variables], is.numeric)]
+    stop("The following variables are not numeric: ", 
+         paste(non_numeric, collapse = ", "))
+  }
+  
+  # Compute correlation matrix and p-values
+  cor_data <- as.matrix(df[variables])
+  cor_results <- Hmisc::rcorr(cor_data)
+  cor_mat <- cor_results$r
+  p_mat <- cor_results$P
+  
+  # Open graphics device if filename is given
+  if (!is.null(filename)) {
+    png(filename = filename, units = units, width = width, height = height)
+  }
+  
+  # Plot
+  corrplot::corrplot(cor_mat, method = "number", type = "upper", 
+                     tl.col = "black", tl.srt = 45,
+                     p.mat = p_mat, sig.level = 0.05, insig = "blank",
+                     diag = FALSE,
+                     number.cex = 2,
+                     cl.cex = 1.5,
+                     tl.cex = 1.5,
+                     col = colorRampPalette(c("blue", "purple", "red"))(200),
+                     ...)
+  
+  title(main = title, line = 1, adj = 0, cex.main = 2.5)
+  mtext("Values are Pearson's r\nBlank cells indicate non-significant correlations (p > 0.05)", 
+        side = 1, line = 3, adj = 0, cex = 1.2)
+  
+  if (!is.null(filename)) dev.off()
+}
 
 
 # MBLM ----

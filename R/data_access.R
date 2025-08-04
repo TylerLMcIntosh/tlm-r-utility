@@ -3,6 +3,75 @@
 # Data management ---- 
 
 
+#' Download and Unzip a File
+#'
+#' Downloads a ZIP file from a specified URL and extracts its contents to a specified directory.
+#' Optionally, the ZIP file can be retained after extraction.
+#'
+#' @param url Character. The URL of the ZIP file to download.
+#' @param extract_to Character. The directory where the contents should be extracted.
+#' @param keep_zip Logical. If `TRUE`, retains the ZIP file after extraction. Defaults to `FALSE`.
+#'
+#' @return Invisible `NULL`. The function is used for its side effects of downloading and extracting files.
+#'
+#' @details The function downloads a ZIP file from a URL and extracts its contents to a specified directory.
+#' If `keep_zip` is set to `FALSE`, the ZIP file will be deleted after extraction.
+#'
+#' @importFrom utils download.file unzip
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' download_unzip_file("https://example.com/data.zip", "path/to/extract", keep_zip = TRUE)
+#' }
+download_unzip_file <- function(url, extract_to, keep_zip = FALSE) {
+  # Validate URL and extraction path
+  if (!is.character(url) || length(url) != 1) stop("`url` must be a single character string.")
+  if (!is.character(extract_to) || length(extract_to) != 1) stop("`extract_to` must be a single character string.")
+  if (!is.logical(keep_zip) || length(keep_zip) != 1) stop("`keep_zip` must be a single logical value.")
+  
+  # Ensure the extraction directory exists
+  if (!dir.exists(extract_to)) dir.create(extract_to, recursive = TRUE)
+  
+  # Determine the path to save the ZIP file
+  zip_path <- if (keep_zip) {
+    # Save the ZIP file to the specified extraction directory
+    file.path(extract_to, basename(url))
+  } else {
+    # Use a temporary file path for the ZIP file
+    tempfile(fileext = ".zip")
+  }
+  
+  # Ensure temporary file cleanup if there's an error and keep_zip is FALSE
+  on.exit({
+    if (!keep_zip && file.exists(zip_path)) {
+      unlink(zip_path)
+    }
+  }, add = TRUE)
+  
+  # Attempt to download the ZIP file
+  tryCatch({
+    download.file(url, zip_path, mode = "wb")
+  }, error = function(e) {
+    stop("Failed to download the file from the specified URL: ", e$message)
+  })
+  
+  # Attempt to unzip the file to the specified extraction directory
+  tryCatch({
+    unzip(zip_path, exdir = extract_to)
+  }, error = function(e) {
+    stop("Failed to unzip the file: ", e$message)
+  })
+  
+  # Delete the ZIP file if 'keep_zip' is FALSE
+  if (!keep_zip) {
+    unlink(zip_path)
+  }
+  
+  gc()
+  
+  invisible(NULL)
+}
 
 #' Read a CSV File from Google Drive
 #'
