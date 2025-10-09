@@ -354,68 +354,143 @@ write_session_info <- function(path) {
 }
 
 
-#' Install and Load Required Packages Using pak
-#'
-#' This function ensures that the specified packages (from CRAN or GitHub) are installed and loaded.
-#' It uses the `pak` package for fast and reliable package installation, supporting versioned and GitHub installs.
-#' If any packages are missing, they are automatically installed without prompting the user.
-#'
-#' @param package_list A character vector of package specifications to check, install, and load.
-#' For CRAN packages, use names like `"dplyr"` or `"dplyr@1.1.4"`. For GitHub packages, use the
-#' `"username/repo"` format, optionally with a version or ref (e.g., `"hadley/ggplot2@main"`).
-#'
-#' @return No return value. The specified packages are installed (if missing) and loaded into the session.
-#'
-#' @details
-#' This function automatically installs the `pak` package if it is not available.
-#' It distinguishes between CRAN and GitHub packages based on the presence of a "/" in the string.
-#' It loads each package by extracting its base name from the specification.
-#'
-#' @examples
-#' \dontrun{
-#' install_and_load_packages(c("dplyr", "hadley/ggplot2", "data.table@1.14.2"))
-#' }
-#'
-#' @importFrom pak pkg_install
-#' @export
-install_and_load_packages <- function(package_list) {
-  # Ensure pak is available
-  if (!requireNamespace("pak", quietly = TRUE)) {
-    cat("The 'pak' package is required for fast installation of packages, installing now.\n")
-    install.packages("pak")
+
+install_load_packages <- function(pkgs, date = NULL, groundhog = FALSE, pak_quiet = TRUE) {
+  
+  # --- Helper: quiet install with base R ---
+  safe_install <- function(pkg, repos = "https://cloud.r-project.org") {
+    tryCatch(
+      suppressWarnings(install.packages(pkg, repos = repos, dependencies = TRUE)),
+      error = function(e) message("Could not install ", pkg, ": ", e$message)
+    )
   }
   
-  # Helper: Extract base name of a package for require()
-  parse_pkg_name <- function(pkg) {
-    if (grepl("/", pkg)) {
-      sub("^.+/(.+?)(@.+)?$", "\\1", pkg)  # GitHub: extract repo name
-    } else {
-      sub("@.*$", "", pkg)  # CRAN: remove @version if present
+  # --- Check which packages are missing ---
+  not_installed <- vapply(pkgs, function(p) !requireNamespace(p, quietly = TRUE), logical(1))
+  missing_pkgs <- pkgs[not_installed]
+  
+  if (length(missing_pkgs) == 0) {
+    message("All requested packages are already installed.")
+  }
+  
+  # --- Only ensure pak if actually needed ---
+  has_pak <- requireNamespace("pak", quietly = TRUE)
+  if (length(missing_pkgs) > 0 && !has_pak) {
+    message("Some packages are missing; installing 'pak'...")
+    
+    pak_install_success <- FALSE
+    try({
+      suppressWarnings(
+        install.packages("pak", repos = "https://cloud.r-project.org", dependencies = TRUE)
+      )
+      pak_install_success <- requireNamespace("pak", quietly = TRUE)
+    }, silent = TRUE)
+    
+    if (!pak_install_success) {
+      message("Standard install failed; trying pak bootstrap installer...")
+      try({
+        source("https://pak.r-lib.org/install.R")
+        pak_install_success <- requireNamespace("pak", quietly = TRUE)
+      }, silent = TRUE)
+    }
+    
+    if (!pak_install_success) {
+      warning("Failed to install 'pak' by any method; will fall back to base installers only.")
+    }
+    
+    has_pak <- requireNamespace("pak", quietly = TRUE)
+  }
+  
+  # --- Optionally ensure groundhog ---
+  if (groundhog) {
+    if (!requireNamespace("groundhog", quietly = TRUE)) {
+      message("Installing 'groundhog'...")
+      safe_install("groundhog")
+    }
+    if (is.null(date)) {
+      stop("groundhog = TRUE requires a non-null 'date' argument (YYYY-MM-DD).")
     }
   }
   
-  # Classify and separate packages
-  missing_pkgs <- c()
-  for (pkg in package_list) {
-    pkg_name <- parse_pkg_name(pkg)
-    if (!requireNamespace(pkg_name, quietly = TRUE)) {
-      missing_pkgs <- c(missing_pkgs, pkg)
-    }
+  # --- Repository selection ---
+  repo <- if (!is.null(date)) {
+    sprintf("https://packagemanager.posit.co/cran/%s", date)
+  } else {
+    "https://cloud.r-project.org"
   }
+  message("Using CRAN repository: ", repo)
+  options(repos = c(CRAN = repo))
   
-  # Install missing ones (CRAN or GitHub), with version support
+  # --- Install missing packages ---
+  installed_or_updated <- FALSE
+  
   if (length(missing_pkgs) > 0) {
-    pak::pkg_install(missing_pkgs, upgrade = TRUE, ask = FALSE)
+    message("Missing packages detected: ", paste(missing_pkgs, collapse = ", "))
+    
+    if (has_pak) {
+      tryCatch({
+        if (pak_quiet) {
+          message("Attempting install with pak (quietly)...")
+          suppressMessages(suppressWarnings(
+            pak::pkg_install(missing_pkgs, ask = FALSE, upgrade = FALSE)
+          ))
+        } else {
+          message("Attempting install with pak...")
+          pak::pkg_install(missing_pkgs, ask = FALSE, upgrade = FALSE)
+        }
+        installed_or_updated <<- TRUE
+      }, error = function(e) {
+        message("pak installation failed: ", e$message)
+        message("Falling back to install.packages()...")
+        for (p in missing_pkgs) safe_install(p, repos = repo)
+        installed_or_updated <<- TRUE
+      })
+    } else {
+      message("pak unavailable; installing missing packages with install.packages()...")
+      for (p in missing_pkgs) safe_install(p, repos = repo)
+      installed_or_updated <- TRUE
+    }
   }
   
-  # Load all packages
-  for (pkg in package_list) {
-    pkg_name <- parse_pkg_name(pkg)
-    success <- require(pkg_name, character.only = TRUE, quietly = TRUE)
-    if (!success) cat("Failed to load package:", pkg_name, "\n")
+  # --- Load packages ---
+  failed_to_load <- character()
+  
+  if (groundhog) {
+    message("Loading packages with groundhog (date = ", date, ")...")
+    tryCatch({
+      groundhog::groundhog.library(pkgs, date = date)
+    }, error = function(e) {
+      message("groundhog loading error: ", e$message)
+      failed_to_load <<- pkgs
+    })
+  } else {
+    message("Loading packages...")
+    for (p in pkgs) {
+      ok <- tryCatch({
+        library(p, character.only = TRUE, quietly = TRUE)
+        TRUE
+      }, error = function(e) {
+        message("Failed to load ", p, ": ", e$message)
+        FALSE
+      })
+      if (!ok) failed_to_load <- c(failed_to_load, p)
+    }
   }
   
-  cat("All specified packages installed and loaded.\n")
+  # --- Restart message if needed ---
+  if (installed_or_updated || length(failed_to_load) > 0) {
+    message("\nSome packages were newly installed, updated, or failed to load.\n",
+            "This may be due to updated dependencies already loaded in memory.\n",
+            "Please restart R and re-run this function to ensure all packages load correctly.\n")
+  }
+  
+  # --- Report loaded versions ---
+  loaded_versions <- sapply(pkgs, function(p) {
+    if (requireNamespace(p, quietly = TRUE)) as.character(packageVersion(p)) else NA_character_
+  })
+  message("Packages loaded:\n",
+          paste(names(loaded_versions), loaded_versions, collapse = "\n"))
+  invisible(loaded_versions)
 }
 
 
@@ -677,460 +752,523 @@ create_qgis_style_for_paletted_raster_from_csv <- function(styleData, outputQmlP
 
 
 # DEPRECATED ----
-
-# REPLACED BY safe_extract
-#' Safe Unzip a File (with Optional Recursive Unzipping and ZIP Cleanup)
-#'
-#' Safely unzips a ZIP file to a specified directory. Supports skipping extraction if files or top-level folder already exist, recursive unzipping of nested ZIPs, and optional deletion of ZIP files.
-#'
-#' @param zip_path Character. Path to the local ZIP file.
-#' @param extract_to Character. Directory where the contents should be extracted. Defaults to the ZIP's directory.
-#' @param recursive Logical. If TRUE, recursively unzip nested ZIP files. Defaults to FALSE.
-#' @param keep_zip Logical. If FALSE, deletes the original ZIP and any nested ZIPs after unzipping. Defaults to TRUE.
-#' @param full_contents_check Logical. If TRUE, skip unzip only if all expected files exist. If FALSE (default), skip unzip if the top-level directory exists.
-#' @param return_all_paths Logical. If TRUE, returns full paths to all extracted files. If FALSE (default), returns only the top-level directory path.
-#'
-#' @return A character vector of extracted file paths (if \code{return_all_paths = TRUE}) or a single path to the top-level extracted directory (if \code{return_all_paths = FALSE}).
-#'
-#' @importFrom utils unzip
-#' @export
-#'
-#' @examples
-#' \dontrun{
-#' # Recursively unzip and delete all ZIPs, return full paths
-#' files <- safe_unzip("data/archive.zip", recursive = TRUE, keep_zip = FALSE, return_all_paths = TRUE)
-#'
-#' # Unzip only if top folder doesn't exist, return folder path
-#' folder <- safe_unzip("data/archive.zip", full_contents_check = FALSE, return_all_paths = FALSE)
-#' }
-safe_unzip <- function(zip_path,
-                       extract_to = dirname(zip_path),
-                       recursive = FALSE,
-                       keep_zip = TRUE,
-                       full_contents_check = FALSE,
-                       return_all_paths = FALSE) {
-  # Validate inputs
-  if (!file.exists(zip_path)) stop("ZIP file does not exist: ", zip_path)
-  if (!is.character(extract_to) || length(extract_to) != 1) stop("`extract_to` must be a single character string.")
-  if (!is.logical(recursive) || length(recursive) != 1) stop("`recursive` must be a single logical value.")
-  if (!is.logical(keep_zip) || length(keep_zip) != 1) stop("`keep_zip` must be a single logical value.")
-  if (!is.logical(full_contents_check) || length(full_contents_check) != 1) stop("`full_contents_check` must be logical.")
-  if (!is.logical(return_all_paths) || length(return_all_paths) != 1) stop("`return_all_paths` must be logical.")
-  
-  # Get ZIP listing and top-level directory
-  zip_listing <- unzip(zip_path, list = TRUE)
-  top_level_dirs <- unique(sub("/.*", "", zip_listing$Name))
-  top_dir_path <- file.path(extract_to, top_level_dirs[1])
-  
-  # Determine whether to skip unzip
-  skip_unzip <- FALSE
-  if (full_contents_check) {
-    expected_paths <- file.path(extract_to, zip_listing$Name)
-    skip_unzip <- all(file.exists(expected_paths))
-  } else {
-    skip_unzip <- dir.exists(top_dir_path)
-  }
-  
-  if (!skip_unzip) {
-    if (!dir.exists(extract_to)) dir.create(extract_to, recursive = TRUE)
-    tryCatch({
-      unzip(zip_path, exdir = extract_to)
-    }, error = function(e) {
-      stop("Failed to unzip: ", e$message)
-    })
-    
-    if (recursive) {
-      nested_zips <- list.files(extract_to, pattern = "\\.zip$", recursive = TRUE, full.names = TRUE)
-      for (nz in nested_zips) {
-        unzip(nz, exdir = dirname(nz))
-        if (!keep_zip) unlink(nz)
-      }
-    }
-    
-    if (!keep_zip) unlink(zip_path)
-  } else {
-    message("Skipping unzip: Extraction target(s) already exist in ", extract_to)
-  }
-  
-  if (return_all_paths) {
-    all_files <- list.files(extract_to, recursive = TRUE, full.names = TRUE)
-    file_paths <- all_files[file.info(all_files)$isdir == FALSE]
-    return(invisible(normalizePath(file_paths, winslash = "/", mustWork = FALSE)))
-  } else {
-    return(invisible(normalizePath(top_dir_path, winslash = "/", mustWork = FALSE)))
-  }
-}
-
-#' Unzip Files or All Zip Files in a Directory
-#'
-#' This function checks if the input is a zip file or a directory. If it's a specific zip file, it will unzip the file into a folder with the same name (excluding the `.zip` extension) if the folder does not already exist. If the input is a directory, it will locate all `.zip` files in that directory and unzip them into their respective folders, creating the folder if necessary.
-#'
-#' @param zip_location A character string representing either a path to a specific zip file or a directory containing zip files.
 #' 
-#' @return No return value. The function unzips files as needed and prints messages indicating whether files were unzipped or if the target folders already existed.
-#'
-#' @details 
-#' - If `zip_location` points to a zip file and the corresponding folder doesn't exist, the function will unzip the file into a new folder located in the same directory as the zip file.
-#' - If `zip_location` points to a directory, the function will iterate over all zip files in the directory, unzipping each into a folder named after the zip file (without the `.zip` extension).
-#' - If a folder with the same name as the zip file already exists, the function will skip unzipping that file.
+#' # REPLACED BY safe_extract
+#' #' Safe Unzip a File (with Optional Recursive Unzipping and ZIP Cleanup)
+#' #'
+#' #' Safely unzips a ZIP file to a specified directory. Supports skipping extraction if files or top-level folder already exist, recursive unzipping of nested ZIPs, and optional deletion of ZIP files.
+#' #'
+#' #' @param zip_path Character. Path to the local ZIP file.
+#' #' @param extract_to Character. Directory where the contents should be extracted. Defaults to the ZIP's directory.
+#' #' @param recursive Logical. If TRUE, recursively unzip nested ZIP files. Defaults to FALSE.
+#' #' @param keep_zip Logical. If FALSE, deletes the original ZIP and any nested ZIPs after unzipping. Defaults to TRUE.
+#' #' @param full_contents_check Logical. If TRUE, skip unzip only if all expected files exist. If FALSE (default), skip unzip if the top-level directory exists.
+#' #' @param return_all_paths Logical. If TRUE, returns full paths to all extracted files. If FALSE (default), returns only the top-level directory path.
+#' #'
+#' #' @return A character vector of extracted file paths (if \code{return_all_paths = TRUE}) or a single path to the top-level extracted directory (if \code{return_all_paths = FALSE}).
+#' #'
+#' #' @importFrom utils unzip
+#' #' @export
+#' #'
+#' #' @examples
+#' #' \dontrun{
+#' #' # Recursively unzip and delete all ZIPs, return full paths
+#' #' files <- safe_unzip("data/archive.zip", recursive = TRUE, keep_zip = FALSE, return_all_paths = TRUE)
+#' #'
+#' #' # Unzip only if top folder doesn't exist, return folder path
+#' #' folder <- safe_unzip("data/archive.zip", full_contents_check = FALSE, return_all_paths = FALSE)
+#' #' }
+#' safe_unzip <- function(zip_path,
+#'                        extract_to = dirname(zip_path),
+#'                        recursive = FALSE,
+#'                        keep_zip = TRUE,
+#'                        full_contents_check = FALSE,
+#'                        return_all_paths = FALSE) {
+#'   # Validate inputs
+#'   if (!file.exists(zip_path)) stop("ZIP file does not exist: ", zip_path)
+#'   if (!is.character(extract_to) || length(extract_to) != 1) stop("`extract_to` must be a single character string.")
+#'   if (!is.logical(recursive) || length(recursive) != 1) stop("`recursive` must be a single logical value.")
+#'   if (!is.logical(keep_zip) || length(keep_zip) != 1) stop("`keep_zip` must be a single logical value.")
+#'   if (!is.logical(full_contents_check) || length(full_contents_check) != 1) stop("`full_contents_check` must be logical.")
+#'   if (!is.logical(return_all_paths) || length(return_all_paths) != 1) stop("`return_all_paths` must be logical.")
+#'   
+#'   # Get ZIP listing and top-level directory
+#'   zip_listing <- unzip(zip_path, list = TRUE)
+#'   top_level_dirs <- unique(sub("/.*", "", zip_listing$Name))
+#'   top_dir_path <- file.path(extract_to, top_level_dirs[1])
+#'   
+#'   # Determine whether to skip unzip
+#'   skip_unzip <- FALSE
+#'   if (full_contents_check) {
+#'     expected_paths <- file.path(extract_to, zip_listing$Name)
+#'     skip_unzip <- all(file.exists(expected_paths))
+#'   } else {
+#'     skip_unzip <- dir.exists(top_dir_path)
+#'   }
+#'   
+#'   if (!skip_unzip) {
+#'     if (!dir.exists(extract_to)) dir.create(extract_to, recursive = TRUE)
+#'     tryCatch({
+#'       unzip(zip_path, exdir = extract_to)
+#'     }, error = function(e) {
+#'       stop("Failed to unzip: ", e$message)
+#'     })
+#'     
+#'     if (recursive) {
+#'       nested_zips <- list.files(extract_to, pattern = "\\.zip$", recursive = TRUE, full.names = TRUE)
+#'       for (nz in nested_zips) {
+#'         unzip(nz, exdir = dirname(nz))
+#'         if (!keep_zip) unlink(nz)
+#'       }
+#'     }
+#'     
+#'     if (!keep_zip) unlink(zip_path)
+#'   } else {
+#'     message("Skipping unzip: Extraction target(s) already exist in ", extract_to)
+#'   }
+#'   
+#'   if (return_all_paths) {
+#'     all_files <- list.files(extract_to, recursive = TRUE, full.names = TRUE)
+#'     file_paths <- all_files[file.info(all_files)$isdir == FALSE]
+#'     return(invisible(normalizePath(file_paths, winslash = "/", mustWork = FALSE)))
+#'   } else {
+#'     return(invisible(normalizePath(top_dir_path, winslash = "/", mustWork = FALSE)))
+#'   }
+#' }
 #' 
-#' @examples
-#' \dontrun{
-#' # Unzipping a specific file
-#' unzip_if_zipped("path/to/file.zip")
-#'
-#' # Unzipping all zip files in a directory
-#' unzip_if_zipped("path/to/directory")
+#' #' Unzip Files or All Zip Files in a Directory
+#' #'
+#' #' This function checks if the input is a zip file or a directory. If it's a specific zip file, it will unzip the file into a folder with the same name (excluding the `.zip` extension) if the folder does not already exist. If the input is a directory, it will locate all `.zip` files in that directory and unzip them into their respective folders, creating the folder if necessary.
+#' #'
+#' #' @param zip_location A character string representing either a path to a specific zip file or a directory containing zip files.
+#' #' 
+#' #' @return No return value. The function unzips files as needed and prints messages indicating whether files were unzipped or if the target folders already existed.
+#' #'
+#' #' @details 
+#' #' - If `zip_location` points to a zip file and the corresponding folder doesn't exist, the function will unzip the file into a new folder located in the same directory as the zip file.
+#' #' - If `zip_location` points to a directory, the function will iterate over all zip files in the directory, unzipping each into a folder named after the zip file (without the `.zip` extension).
+#' #' - If a folder with the same name as the zip file already exists, the function will skip unzipping that file.
+#' #' 
+#' #' @examples
+#' #' \dontrun{
+#' #' # Unzipping a specific file
+#' #' unzip_if_zipped("path/to/file.zip")
+#' #'
+#' #' # Unzipping all zip files in a directory
+#' #' unzip_if_zipped("path/to/directory")
+#' #' }
+#' #'
+#' #' @importFrom utils unzip
+#' unzip_if_zipped <- function(zip_location) {
+#'   # Check if the input is a specific zip file
+#'   if (file.exists(zip_location) && grepl("\\.zip$", zip_location)) {
+#'     # It's a specific zip file
+#'     folder_name <- sub("\\.zip$", "", basename(zip_location))
+#'     destination_path <- file.path(dirname(zip_location), folder_name)
+#'     
+#'     # Check if the corresponding folder already exists
+#'     if (!dir.exists(destination_path)) {
+#'       # Unzip the file into the new folder
+#'       unzip(zip_location, exdir = destination_path)
+#'       cat("Unzipped:", zip_location, "to", destination_path, "\n")
+#'     } else {
+#'       cat("Folder already exists:", destination_path, "\n")
+#'     }
+#'   } else if (dir.exists(zip_location)) {
+#'     # It's a directory, process all zip files in the directory
+#'     zip_files <- list.files(zip_location, pattern = "\\.zip$", full.names = TRUE)
+#'     
+#'     if (length(zip_files) == 0) {
+#'       cat("No zip files found in the directory:", zip_location, "\n")
+#'     } else {
+#'       for (zip_file in zip_files) {
+#'         folder_name <- sub("\\.zip$", "", basename(zip_file))
+#'         destination_path <- file.path(zip_location, folder_name)
+#'         
+#'         # Check if the corresponding folder already exists
+#'         if (!dir.exists(destination_path)) {
+#'           # Unzip the file into the new folder
+#'           unzip(zip_file, exdir = destination_path)
+#'           cat("Unzipped:", zip_file, "to", destination_path, "\n")
+#'         } else {
+#'           cat("Folder already exists:", destination_path, "\n")
+#'         }
+#'       }
+#'     }
+#'   } else {
+#'     cat("The provided path is neither a valid zip file nor a directory.\n")
+#'   }
 #' }
-#'
-#' @importFrom utils unzip
-unzip_if_zipped <- function(zip_location) {
-  # Check if the input is a specific zip file
-  if (file.exists(zip_location) && grepl("\\.zip$", zip_location)) {
-    # It's a specific zip file
-    folder_name <- sub("\\.zip$", "", basename(zip_location))
-    destination_path <- file.path(dirname(zip_location), folder_name)
-    
-    # Check if the corresponding folder already exists
-    if (!dir.exists(destination_path)) {
-      # Unzip the file into the new folder
-      unzip(zip_location, exdir = destination_path)
-      cat("Unzipped:", zip_location, "to", destination_path, "\n")
-    } else {
-      cat("Folder already exists:", destination_path, "\n")
-    }
-  } else if (dir.exists(zip_location)) {
-    # It's a directory, process all zip files in the directory
-    zip_files <- list.files(zip_location, pattern = "\\.zip$", full.names = TRUE)
-    
-    if (length(zip_files) == 0) {
-      cat("No zip files found in the directory:", zip_location, "\n")
-    } else {
-      for (zip_file in zip_files) {
-        folder_name <- sub("\\.zip$", "", basename(zip_file))
-        destination_path <- file.path(zip_location, folder_name)
-        
-        # Check if the corresponding folder already exists
-        if (!dir.exists(destination_path)) {
-          # Unzip the file into the new folder
-          unzip(zip_file, exdir = destination_path)
-          cat("Unzipped:", zip_file, "to", destination_path, "\n")
-        } else {
-          cat("Folder already exists:", destination_path, "\n")
-        }
-      }
-    }
-  } else {
-    cat("The provided path is neither a valid zip file nor a directory.\n")
-  }
-}
-
-
-
-#' Install and Load Required Packages Using pak
-#'
-#' This function checks if the specified packages (both CRAN and GitHub) are installed and loads them. 
-#' If any packages are missing, it offers to install them automatically or asks for user permission.
-#' It uses the `pak` package for faster and more efficient package installation.
-#'
-#' @param package_list A list of package names to check and install (non-string, e.g., `c(dplyr, here)`).
-#' GitHub packages should be specified as `username/repo` in strings.
-#' @param auto_install A character ("y" or "n", default is "n"). If "y", installs all required packages 
-#' without asking for user permission. If "n", asks for permission from the user.
-#' @return No return value. Installs and loads the specified packages as needed.
-#' @examples
-#' \dontrun{
-#' install_and_load_packages(c(dplyr, here, "username/repo"))
+#' 
+#' 
+#' 
+#' #' Install and Load Required Packages Using pak
+#' #'
+#' #' This function checks if the specified packages (both CRAN and GitHub) are installed and loads them. 
+#' #' If any packages are missing, it offers to install them automatically or asks for user permission.
+#' #' It uses the `pak` package for faster and more efficient package installation.
+#' #'
+#' #' @param package_list A list of package names to check and install (non-string, e.g., `c(dplyr, here)`).
+#' #' GitHub packages should be specified as `username/repo` in strings.
+#' #' @param auto_install A character ("y" or "n", default is "n"). If "y", installs all required packages 
+#' #' without asking for user permission. If "n", asks for permission from the user.
+#' #' @return No return value. Installs and loads the specified packages as needed.
+#' #' @examples
+#' #' \dontrun{
+#' #' install_and_load_packages(c(dplyr, here, "username/repo"))
+#' #' }
+#' #' @importFrom pak pkg_install
+#' #' @export
+#' install_and_load_packages <- function(package_list, auto_install = "n") {
+#'   # Convert non-string package names to strings
+#'   package_list <- lapply(package_list, function(pkg) {
+#'     if (is.symbol(pkg)) {
+#'       deparse(substitute(pkg))
+#'     } else {
+#'       pkg
+#'     }
+#'   })
+#'   
+#'   # Check if pak is installed; install if not
+#'   if (!requireNamespace("pak", quietly = TRUE)) {
+#'     cat("The 'pak' package is required for fast installation of packages.\n")
+#'     response <- if (auto_install == "y") "y" else readline(prompt = "\nDo you want to install the 'pak' package? (y/n): ")
+#'     if (tolower(response) == "y") {
+#'       install.packages("pak")
+#'     } else {
+#'       stop("Installation cannot proceed without 'pak'. Please install it manually and rerun.")
+#'     }
+#'   }
+#'   
+#'   # Initialize lists to store missing CRAN and GitHub packages
+#'   missing_cran_packages <- c()
+#'   missing_github_packages <- c()
+#'   
+#'   # Helper function to get user input
+#'   get_user_permission <- function(prompt_msg) {
+#'     if (auto_install == "y") {
+#'       return("y")
+#'     } else {
+#'       return(tolower(readline(prompt = prompt_msg)))
+#'     }
+#'   }
+#'   
+#'   # Check for missing packages
+#'   for (pkg in package_list) {
+#'     if (grepl("/", pkg)) { # GitHub package
+#'       package_name <- unlist(strsplit(pkg, "/"))[2]
+#'       package_loaded <- require(package_name, character.only = TRUE, quietly = TRUE)
+#'     } else { # CRAN package
+#'       package_loaded <- require(pkg, character.only = TRUE, quietly = TRUE)
+#'     }
+#'     if (!package_loaded) {
+#'       if (grepl("/", pkg)) {
+#'         missing_github_packages <- c(missing_github_packages, pkg)
+#'       } else {
+#'         missing_cran_packages <- c(missing_cran_packages, pkg)
+#'       }
+#'     }
+#'   }
+#'   
+#'   # Install missing CRAN packages using pak::pkg_install
+#'   if (length(missing_cran_packages) > 0) {
+#'     cat("The following CRAN packages are missing: ", paste(missing_cran_packages, collapse = ", "), "\n")
+#'     response <- get_user_permission("\nDo you want to install the missing CRAN packages? (y/n): ")
+#'     if (response == "y") {
+#'       pak::pkg_install(missing_cran_packages, upgrade = TRUE)
+#'     } else {
+#'       cat("Skipping installation of missing CRAN packages.\n")
+#'     }
+#'   }
+#'   
+#'   # Install missing GitHub packages using pak::pkg_install
+#'   if (length(missing_github_packages) > 0) {
+#'     cat("The following GitHub packages are missing: ", paste(missing_github_packages, collapse = ", "), "\n")
+#'     response <- get_user_permission("\nDo you want to install the missing GitHub packages? (y/n): ")
+#'     if (response == "y") {
+#'       pak::pkg_install(missing_github_packages, upgrade = TRUE)
+#'     } else {
+#'       cat("Skipping installation of missing GitHub packages.\n")
+#'     }
+#'   }
+#'   
+#'   # Load all packages after checking for installation
+#'   for (pkg in package_list) {
+#'     if (grepl("/", pkg)) { # GitHub package
+#'       package_name <- unlist(strsplit(pkg, "/"))[2]
+#'       if (!require(package_name, character.only = TRUE)) {
+#'         cat("Failed to load GitHub package:", package_name, "\n")
+#'       }
+#'     } else { # CRAN package
+#'       if (!require(pkg, character.only = TRUE)) {
+#'         cat("Failed to load CRAN package:", pkg, "\n")
+#'       }
+#'     }
+#'   }
+#'   
+#'   cat("All specified packages installed and loaded.\n")
 #' }
-#' @importFrom pak pkg_install
-#' @export
-install_and_load_packages <- function(package_list, auto_install = "n") {
-  # Convert non-string package names to strings
-  package_list <- lapply(package_list, function(pkg) {
-    if (is.symbol(pkg)) {
-      deparse(substitute(pkg))
-    } else {
-      pkg
-    }
-  })
-  
-  # Check if pak is installed; install if not
-  if (!requireNamespace("pak", quietly = TRUE)) {
-    cat("The 'pak' package is required for fast installation of packages.\n")
-    response <- if (auto_install == "y") "y" else readline(prompt = "\nDo you want to install the 'pak' package? (y/n): ")
-    if (tolower(response) == "y") {
-      install.packages("pak")
-    } else {
-      stop("Installation cannot proceed without 'pak'. Please install it manually and rerun.")
-    }
-  }
-  
-  # Initialize lists to store missing CRAN and GitHub packages
-  missing_cran_packages <- c()
-  missing_github_packages <- c()
-  
-  # Helper function to get user input
-  get_user_permission <- function(prompt_msg) {
-    if (auto_install == "y") {
-      return("y")
-    } else {
-      return(tolower(readline(prompt = prompt_msg)))
-    }
-  }
-  
-  # Check for missing packages
-  for (pkg in package_list) {
-    if (grepl("/", pkg)) { # GitHub package
-      package_name <- unlist(strsplit(pkg, "/"))[2]
-      package_loaded <- require(package_name, character.only = TRUE, quietly = TRUE)
-    } else { # CRAN package
-      package_loaded <- require(pkg, character.only = TRUE, quietly = TRUE)
-    }
-    if (!package_loaded) {
-      if (grepl("/", pkg)) {
-        missing_github_packages <- c(missing_github_packages, pkg)
-      } else {
-        missing_cran_packages <- c(missing_cran_packages, pkg)
-      }
-    }
-  }
-  
-  # Install missing CRAN packages using pak::pkg_install
-  if (length(missing_cran_packages) > 0) {
-    cat("The following CRAN packages are missing: ", paste(missing_cran_packages, collapse = ", "), "\n")
-    response <- get_user_permission("\nDo you want to install the missing CRAN packages? (y/n): ")
-    if (response == "y") {
-      pak::pkg_install(missing_cran_packages, upgrade = TRUE)
-    } else {
-      cat("Skipping installation of missing CRAN packages.\n")
-    }
-  }
-  
-  # Install missing GitHub packages using pak::pkg_install
-  if (length(missing_github_packages) > 0) {
-    cat("The following GitHub packages are missing: ", paste(missing_github_packages, collapse = ", "), "\n")
-    response <- get_user_permission("\nDo you want to install the missing GitHub packages? (y/n): ")
-    if (response == "y") {
-      pak::pkg_install(missing_github_packages, upgrade = TRUE)
-    } else {
-      cat("Skipping installation of missing GitHub packages.\n")
-    }
-  }
-  
-  # Load all packages after checking for installation
-  for (pkg in package_list) {
-    if (grepl("/", pkg)) { # GitHub package
-      package_name <- unlist(strsplit(pkg, "/"))[2]
-      if (!require(package_name, character.only = TRUE)) {
-        cat("Failed to load GitHub package:", package_name, "\n")
-      }
-    } else { # CRAN package
-      if (!require(pkg, character.only = TRUE)) {
-        cat("Failed to load CRAN package:", pkg, "\n")
-      }
-    }
-  }
-  
-  cat("All specified packages installed and loaded.\n")
-}
-
-
-
-#' Install and Load Required Packages Using pak
-#'
-#' This function checks if the specified packages (both CRAN and GitHub) are installed and loads them. 
-#' If any packages are missing, it installs them automatically.
-#' It uses the `pak` package for faster and more efficient package installation.
-#'
-#' @param package_list A list of package names to check and install (non-string, e.g., `c(dplyr, here)`).
-#' GitHub packages should be specified as `username/repo` in strings.
-#' @param auto_install A character ("y" or "n", default is "n"). If "y", installs all required packages 
-#' without asking for user permission. If "n", asks for permission from the user.
-#' @return No return value. Installs and loads the specified packages as needed.
-#' @examples
-#' \dontrun{
-#' install_and_load_packages(c(dplyr, here, "username/repo"))
+#' 
+#' 
+#' 
+#' #' Install and Load Required Packages Using pak
+#' #'
+#' #' This function checks if the specified packages (both CRAN and GitHub) are installed and loads them. 
+#' #' If any packages are missing, it installs them automatically.
+#' #' It uses the `pak` package for faster and more efficient package installation.
+#' #'
+#' #' @param package_list A list of package names to check and install (non-string, e.g., `c(dplyr, here)`).
+#' #' GitHub packages should be specified as `username/repo` in strings.
+#' #' @param auto_install A character ("y" or "n", default is "n"). If "y", installs all required packages 
+#' #' without asking for user permission. If "n", asks for permission from the user.
+#' #' @return No return value. Installs and loads the specified packages as needed.
+#' #' @examples
+#' #' \dontrun{
+#' #' install_and_load_packages(c(dplyr, here, "username/repo"))
+#' #' }
+#' #' @importFrom pak pkg_install
+#' #' @export
+#' install_and_load_packages <- function(package_list, auto_install = "n") {
+#'   # Convert non-string package names to strings
+#'   package_list <- lapply(package_list, function(pkg) {
+#'     if (is.symbol(pkg)) {
+#'       deparse(substitute(pkg))
+#'     } else {
+#'       pkg
+#'     }
+#'   })
+#'   
+#'   # # Check if 'renv' is installed; if not, skip the 'renv' check
+#'   # if (requireNamespace("renv", quietly = TRUE) && renv::is_active()) {
+#'   #   cat("renv is active. Only loading packages...\n")
+#'   #   for (pkg in package_list) {
+#'   #     package_name <- if (grepl("/", pkg)) unlist(strsplit(pkg, "/"))[2] else pkg
+#'   #     if (!require(package_name, character.only = TRUE)) {
+#'   #       cat("Failed to load package:", package_name, "\n")
+#'   #     }
+#'   #   }
+#'   #   return(invisible())
+#'   # }
+#'   
+#'   # Check if pak is installed; install if not
+#'   if (!requireNamespace("pak", quietly = TRUE)) {
+#'     cat("The 'pak' package is required for fast installation of packages, installing now.\n")
+#'     install.packages("pak")
+#'   }
+#'   
+#'   # Initialize lists to store missing CRAN and GitHub packages
+#'   missing_cran_packages <- c()
+#'   missing_github_packages <- c()
+#'   
+#'   # # Helper function to get user input
+#'   # get_user_permission <- function(prompt_msg) {
+#'   #   if (auto_install == "y") {
+#'   #     return("y")
+#'   #   } else {
+#'   #     return(tolower(readline(prompt = prompt_msg)))
+#'   #   }
+#'   # }
+#'   
+#'   # Check for missing packages
+#'   for (pkg in package_list) {
+#'     if (grepl("/", pkg)) { # GitHub package
+#'       package_name <- unlist(strsplit(pkg, "/"))[2]
+#'       package_loaded <- require(package_name, character.only = TRUE, quietly = TRUE)
+#'     } else { # CRAN package
+#'       package_loaded <- require(pkg, character.only = TRUE, quietly = TRUE)
+#'     }
+#'     if (!package_loaded) {
+#'       if (grepl("/", pkg)) {
+#'         missing_github_packages <- c(missing_github_packages, pkg)
+#'       } else {
+#'         missing_cran_packages <- c(missing_cran_packages, pkg)
+#'       }
+#'     }
+#'   }
+#'   
+#'   # Install missing CRAN packages using pak::pkg_install
+#'   if (length(missing_cran_packages) > 0) {
+#'     # cat("The following CRAN packages are missing: ", paste(missing_cran_packages, collapse = ", "), "\n")
+#'     # response <- get_user_permission("\nDo you want to install the missing CRAN packages? (y/n): ")
+#'     # if (response == "y") {
+#'     pak::pkg_install(missing_cran_packages, upgrade = TRUE)
+#'     # } else {
+#'     #   cat("Skipping installation of missing CRAN packages.\n")
+#'     # }
+#'   }
+#'   
+#'   # Install missing GitHub packages using pak::pkg_install
+#'   if (length(missing_github_packages) > 0) {
+#'     # cat("The following GitHub packages are missing: ", paste(missing_github_packages, collapse = ", "), "\n")
+#'     # response <- get_user_permission("\nDo you want to install the missing GitHub packages? (y/n): ")
+#'     # if (response == "y") {
+#'     pak::pkg_install(missing_github_packages, upgrade = TRUE)
+#'     # } else {
+#'     #   cat("Skipping installation of missing GitHub packages.\n")
+#'     # }
+#'   }
+#'   
+#'   # Load all packages after checking for installation
+#'   for (pkg in package_list) {
+#'     if (grepl("/", pkg)) { # GitHub package
+#'       package_name <- unlist(strsplit(pkg, "/"))[2]
+#'       if (!require(package_name, character.only = TRUE)) {
+#'         cat("Failed to load GitHub package:", package_name, "\n")
+#'       }
+#'     } else { # CRAN package
+#'       if (!require(pkg, character.only = TRUE)) {
+#'         cat("Failed to load CRAN package:", pkg, "\n")
+#'       }
+#'     }
+#'   }
+#'   
+#'   cat("All specified packages installed and loaded.\n")
 #' }
-#' @importFrom pak pkg_install
-#' @export
-install_and_load_packages <- function(package_list, auto_install = "n") {
-  # Convert non-string package names to strings
-  package_list <- lapply(package_list, function(pkg) {
-    if (is.symbol(pkg)) {
-      deparse(substitute(pkg))
-    } else {
-      pkg
-    }
-  })
-  
-  # # Check if 'renv' is installed; if not, skip the 'renv' check
-  # if (requireNamespace("renv", quietly = TRUE) && renv::is_active()) {
-  #   cat("renv is active. Only loading packages...\n")
-  #   for (pkg in package_list) {
-  #     package_name <- if (grepl("/", pkg)) unlist(strsplit(pkg, "/"))[2] else pkg
-  #     if (!require(package_name, character.only = TRUE)) {
-  #       cat("Failed to load package:", package_name, "\n")
-  #     }
-  #   }
-  #   return(invisible())
-  # }
-  
-  # Check if pak is installed; install if not
-  if (!requireNamespace("pak", quietly = TRUE)) {
-    cat("The 'pak' package is required for fast installation of packages, installing now.\n")
-    install.packages("pak")
-  }
-  
-  # Initialize lists to store missing CRAN and GitHub packages
-  missing_cran_packages <- c()
-  missing_github_packages <- c()
-  
-  # # Helper function to get user input
-  # get_user_permission <- function(prompt_msg) {
-  #   if (auto_install == "y") {
-  #     return("y")
-  #   } else {
-  #     return(tolower(readline(prompt = prompt_msg)))
-  #   }
-  # }
-  
-  # Check for missing packages
-  for (pkg in package_list) {
-    if (grepl("/", pkg)) { # GitHub package
-      package_name <- unlist(strsplit(pkg, "/"))[2]
-      package_loaded <- require(package_name, character.only = TRUE, quietly = TRUE)
-    } else { # CRAN package
-      package_loaded <- require(pkg, character.only = TRUE, quietly = TRUE)
-    }
-    if (!package_loaded) {
-      if (grepl("/", pkg)) {
-        missing_github_packages <- c(missing_github_packages, pkg)
-      } else {
-        missing_cran_packages <- c(missing_cran_packages, pkg)
-      }
-    }
-  }
-  
-  # Install missing CRAN packages using pak::pkg_install
-  if (length(missing_cran_packages) > 0) {
-    # cat("The following CRAN packages are missing: ", paste(missing_cran_packages, collapse = ", "), "\n")
-    # response <- get_user_permission("\nDo you want to install the missing CRAN packages? (y/n): ")
-    # if (response == "y") {
-    pak::pkg_install(missing_cran_packages, upgrade = TRUE)
-    # } else {
-    #   cat("Skipping installation of missing CRAN packages.\n")
-    # }
-  }
-  
-  # Install missing GitHub packages using pak::pkg_install
-  if (length(missing_github_packages) > 0) {
-    # cat("The following GitHub packages are missing: ", paste(missing_github_packages, collapse = ", "), "\n")
-    # response <- get_user_permission("\nDo you want to install the missing GitHub packages? (y/n): ")
-    # if (response == "y") {
-    pak::pkg_install(missing_github_packages, upgrade = TRUE)
-    # } else {
-    #   cat("Skipping installation of missing GitHub packages.\n")
-    # }
-  }
-  
-  # Load all packages after checking for installation
-  for (pkg in package_list) {
-    if (grepl("/", pkg)) { # GitHub package
-      package_name <- unlist(strsplit(pkg, "/"))[2]
-      if (!require(package_name, character.only = TRUE)) {
-        cat("Failed to load GitHub package:", package_name, "\n")
-      }
-    } else { # CRAN package
-      if (!require(pkg, character.only = TRUE)) {
-        cat("Failed to load CRAN package:", pkg, "\n")
-      }
-    }
-  }
-  
-  cat("All specified packages installed and loaded.\n")
-}
-
-
-install_and_load_packages <- function(package_list, auto_install = "n") {
-  # Ensure pak is available
-  if (!requireNamespace("pak", quietly = TRUE)) {
-    cat("The 'pak' package is required for fast installation of packages, installing now.\n")
-    install.packages("pak")
-  }
-  
-  # Helper: Extract base name of a package for require()
-  parse_pkg_name <- function(pkg) {
-    if (grepl("/", pkg)) {
-      sub("^.+/(.+?)(@.+)?$", "\\1", pkg)  # GitHub: extract repo name
-    } else {
-      sub("@.*$", "", pkg)  # CRAN: remove @version if present
-    }
-  }
-  
-  # Classify and separate packages
-  missing_pkgs <- c()
-  for (pkg in package_list) {
-    pkg_name <- parse_pkg_name(pkg)
-    if (!requireNamespace(pkg_name, quietly = TRUE)) {
-      missing_pkgs <- c(missing_pkgs, pkg)
-    }
-  }
-  
-  # Install missing ones (CRAN or GitHub), with version support
-  if (length(missing_pkgs) > 0) {
-    pak::pkg_install(missing_pkgs, upgrade = TRUE)
-  }
-  
-  # Load all packages
-  for (pkg in package_list) {
-    pkg_name <- parse_pkg_name(pkg)
-    success <- require(pkg_name, character.only = TRUE, quietly = TRUE)
-    if (!success) cat("Failed to load package:", pkg_name, "\n")
-  }
-  
-  cat("All specified packages installed and loaded.\n")
-}
-
-
-install_and_load_packages <- function(package_list) {
-  # Ensure pak is available
-  if (!requireNamespace("pak", quietly = TRUE)) {
-    cat("The 'pak' package is required for fast installation of packages, installing now.\n")
-    install.packages("pak")
-  }
-  
-  # Helper: Extract base name of a package for require()
-  parse_pkg_name <- function(pkg) {
-    if (grepl("/", pkg)) {
-      sub("^.+/(.+?)(@.+)?$", "\\1", pkg)  # GitHub: extract repo name
-    } else {
-      sub("@.*$", "", pkg)  # CRAN: remove @version if present
-    }
-  }
-  
-  # Classify and separate packages
-  missing_pkgs <- c()
-  for (pkg in package_list) {
-    pkg_name <- parse_pkg_name(pkg)
-    if (!requireNamespace(pkg_name, quietly = TRUE)) {
-      missing_pkgs <- c(missing_pkgs, pkg)
-    }
-  }
-  
-  # Install missing ones (CRAN or GitHub), with version support
-  if (length(missing_pkgs) > 0) {
-    pak::pkg_install(missing_pkgs, upgrade = TRUE, ask = FALSE)
-  }
-  
-  # Load all packages
-  for (pkg in package_list) {
-    pkg_name <- parse_pkg_name(pkg)
-    success <- require(pkg_name, character.only = TRUE, quietly = TRUE)
-    if (!success) cat("Failed to load package:", pkg_name, "\n")
-  }
-  
-  cat("All specified packages installed and loaded.\n")
-}
-
-
-
+#' 
+#' 
+#' install_and_load_packages <- function(package_list, auto_install = "n") {
+#'   # Ensure pak is available
+#'   if (!requireNamespace("pak", quietly = TRUE)) {
+#'     cat("The 'pak' package is required for fast installation of packages, installing now.\n")
+#'     install.packages("pak")
+#'   }
+#'   
+#'   # Helper: Extract base name of a package for require()
+#'   parse_pkg_name <- function(pkg) {
+#'     if (grepl("/", pkg)) {
+#'       sub("^.+/(.+?)(@.+)?$", "\\1", pkg)  # GitHub: extract repo name
+#'     } else {
+#'       sub("@.*$", "", pkg)  # CRAN: remove @version if present
+#'     }
+#'   }
+#'   
+#'   # Classify and separate packages
+#'   missing_pkgs <- c()
+#'   for (pkg in package_list) {
+#'     pkg_name <- parse_pkg_name(pkg)
+#'     if (!requireNamespace(pkg_name, quietly = TRUE)) {
+#'       missing_pkgs <- c(missing_pkgs, pkg)
+#'     }
+#'   }
+#'   
+#'   # Install missing ones (CRAN or GitHub), with version support
+#'   if (length(missing_pkgs) > 0) {
+#'     pak::pkg_install(missing_pkgs, upgrade = TRUE)
+#'   }
+#'   
+#'   # Load all packages
+#'   for (pkg in package_list) {
+#'     pkg_name <- parse_pkg_name(pkg)
+#'     success <- require(pkg_name, character.only = TRUE, quietly = TRUE)
+#'     if (!success) cat("Failed to load package:", pkg_name, "\n")
+#'   }
+#'   
+#'   cat("All specified packages installed and loaded.\n")
+#' }
+#' 
+#' 
+#' install_and_load_packages <- function(package_list) {
+#'   # Ensure pak is available
+#'   if (!requireNamespace("pak", quietly = TRUE)) {
+#'     cat("The 'pak' package is required for fast installation of packages, installing now.\n")
+#'     install.packages("pak")
+#'   }
+#'   
+#'   # Helper: Extract base name of a package for require()
+#'   parse_pkg_name <- function(pkg) {
+#'     if (grepl("/", pkg)) {
+#'       sub("^.+/(.+?)(@.+)?$", "\\1", pkg)  # GitHub: extract repo name
+#'     } else {
+#'       sub("@.*$", "", pkg)  # CRAN: remove @version if present
+#'     }
+#'   }
+#'   
+#'   # Classify and separate packages
+#'   missing_pkgs <- c()
+#'   for (pkg in package_list) {
+#'     pkg_name <- parse_pkg_name(pkg)
+#'     if (!requireNamespace(pkg_name, quietly = TRUE)) {
+#'       missing_pkgs <- c(missing_pkgs, pkg)
+#'     }
+#'   }
+#'   
+#'   # Install missing ones (CRAN or GitHub), with version support
+#'   if (length(missing_pkgs) > 0) {
+#'     pak::pkg_install(missing_pkgs, upgrade = TRUE, ask = FALSE)
+#'   }
+#'   
+#'   # Load all packages
+#'   for (pkg in package_list) {
+#'     pkg_name <- parse_pkg_name(pkg)
+#'     success <- require(pkg_name, character.only = TRUE, quietly = TRUE)
+#'     if (!success) cat("Failed to load package:", pkg_name, "\n")
+#'   }
+#'   
+#'   cat("All specified packages installed and loaded.\n")
+#' }
+#' 
+#' 
+#' 
+#' #' Install and Load Required Packages Using pak
+#' #'
+#' #' This function ensures that the specified packages (from CRAN or GitHub) are installed and loaded.
+#' #' It uses the `pak` package for fast and reliable package installation, supporting versioned and GitHub installs.
+#' #' If any packages are missing, they are automatically installed without prompting the user.
+#' #'
+#' #' @param package_list A character vector of package specifications to check, install, and load.
+#' #' For CRAN packages, use names like `"dplyr"` or `"dplyr@1.1.4"`. For GitHub packages, use the
+#' #' `"username/repo"` format, optionally with a version or ref (e.g., `"hadley/ggplot2@main"`).
+#' #'
+#' #' @return No return value. The specified packages are installed (if missing) and loaded into the session.
+#' #'
+#' #' @details
+#' #' This function automatically installs the `pak` package if it is not available.
+#' #' It distinguishes between CRAN and GitHub packages based on the presence of a "/" in the string.
+#' #' It loads each package by extracting its base name from the specification.
+#' #'
+#' #' @examples
+#' #' \dontrun{
+#' #' install_and_load_packages(c("dplyr", "hadley/ggplot2", "data.table@1.14.2"))
+#' #' }
+#' #'
+#' #' @importFrom pak pkg_install
+#' #' @export
+#' install_and_load_packages <- function(package_list) {
+#'   # Ensure pak is available
+#'   if (!requireNamespace("pak", quietly = TRUE)) {
+#'     cat("The 'pak' package is required for fast installation of packages, installing now.\n")
+#'     install.packages("pak")
+#'   }
+#'   
+#'   # Helper: Extract base name of a package for require()
+#'   parse_pkg_name <- function(pkg) {
+#'     if (grepl("/", pkg)) {
+#'       sub("^.+/(.+?)(@.+)?$", "\\1", pkg)  # GitHub: extract repo name
+#'     } else {
+#'       sub("@.*$", "", pkg)  # CRAN: remove @version if present
+#'     }
+#'   }
+#'   
+#'   # Classify and separate packages
+#'   missing_pkgs <- c()
+#'   for (pkg in package_list) {
+#'     pkg_name <- parse_pkg_name(pkg)
+#'     if (!requireNamespace(pkg_name, quietly = TRUE)) {
+#'       missing_pkgs <- c(missing_pkgs, pkg)
+#'     }
+#'   }
+#'   
+#'   # Install missing ones (CRAN or GitHub), with version support
+#'   if (length(missing_pkgs) > 0) {
+#'     pak::pkg_install(missing_pkgs, upgrade = TRUE, ask = FALSE)
+#'   }
+#'   
+#'   # Load all packages
+#'   for (pkg in package_list) {
+#'     pkg_name <- parse_pkg_name(pkg)
+#'     success <- require(pkg_name, character.only = TRUE, quietly = TRUE)
+#'     if (!success) cat("Failed to load package:", pkg_name, "\n")
+#'   }
+#'   
+#'   cat("All specified packages installed and loaded.\n")
+#' }

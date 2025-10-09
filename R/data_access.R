@@ -525,7 +525,7 @@ access_us_wilderness_study_areas <- function(dest_path = NA) {
 access_data_epa_l1_ecoregions_vsi <- function() {
   epa_l1 <- paste0(
     "/vsizip/vsicurl/",
-    "https://gaftp.epa.gov/EPADataCommons/ORD/Ecoregions/cec_na/na_cec_eco_l1.zip",
+    "https://dmap-prod-oms-edc.s3.us-east-1.amazonaws.com/ORD/Ecoregions/cec_na/na_cec_eco_l1.zip",
     "/NA_CEC_Eco_Level1.shp"
   ) |>
     sf::st_read()
@@ -562,7 +562,7 @@ access_data_epa_l1_ecoregions_vsi <- function() {
 access_data_epa_l2_ecoregions_vsi <- function() {
   epa_l2 <- paste0(
     "/vsizip/vsicurl/",
-    "https://gaftp.epa.gov/EPADataCommons/ORD/Ecoregions/cec_na/na_cec_eco_l2.zip",
+    "https://dmap-prod-oms-edc.s3.us-east-1.amazonaws.com/ORD/Ecoregions/cec_na/na_cec_eco_l2.zip",
     "/NA_CEC_Eco_Level2.shp"
   ) |>
     sf::st_read()
@@ -636,7 +636,7 @@ access_data_epa_l3_ecoregions_vsi <- function() {
 access_data_epa_l4_ecoregions_vsi <- function() {
   epa_l4 <- paste0(
     "/vsizip/vsicurl/",
-    "https://gaftp.epa.gov/EPADataCommons/ORD/Ecoregions/us/us_eco_l4.zip",
+    "https://dmap-prod-oms-edc.s3.us-east-1.amazonaws.com/ORD/Ecoregions/us/us_eco_l4.zip",
     "/us_eco_l4_no_st.shp"
   ) |>
     sf::st_read()
@@ -648,12 +648,38 @@ access_data_epa_l4_ecoregions_vsi <- function() {
 # Landcover Data ----
 
 
+#' Access the 2016 USDA TreeMap Raster
+#'
+#' Downloads and reads the 2016 TreeMap raster directly from the USDA FS RDS-2021-0074 dataset
+#' hosted on AWS via a virtual file system interface. This function utilizes GDAL's `/vsizip/`
+#' and `/vsicurl/` drivers to access a `.tif` file within a remote ZIP archive without
+#' downloading the entire file locally.
+#'
+#' @return A [`SpatRaster`][terra::SpatRaster-class] object representing the 2016 TreeMap.
+#'
+#' @details
+#' The raster is read using the `terra` package via a virtual GDAL connection. This is a
+#' lightweight way to interact with remote geospatial data without unzipping or downloading
+#' the full dataset locally. Useful for quick prototyping or analysis in memory.
+#'
+#' @importFrom glue glue
+#' @importFrom terra rast
+#'
+#' @examples
+#' \dontrun{
+#'   treemap <- access_treemap()
+#'   plot(treemap)
+#' }
+#'
+#' @export
 access_treemap <- function() {
   treemap <- glue::glue(
-    "/vsizip/vsicurl/", #magic remote connection 
-    "https://s3-us-west-2.amazonaws.com/fs.usda.rds/RDS-2021-0074/RDS-2021-0074_Data.zip", #copied link to download location
-    "/Data/TreeMap2016.tif") |> #path inside zip file
-    terra::rast() 
+    "/vsizip/vsicurl/",
+    "https://s3-us-west-2.amazonaws.com/fs.usda.rds/RDS-2021-0074/RDS-2021-0074_Data.zip",
+    "/Data/TreeMap2016.tif"
+  ) |>
+    terra::rast()
+  
   return(treemap)
 }
 
