@@ -32,6 +32,9 @@ library(here)
 
 source(here::here("code", "functions.R"))
 
+###################
+# WARNING: The following function call will install packages. You may manually install and load packages instead.
+###################
 install_and_load_packages(c("sf",
                             "here",
                             "httr",

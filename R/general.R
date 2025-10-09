@@ -354,7 +354,67 @@ write_session_info <- function(path) {
 }
 
 
-
+#' Install and Load R Packages with Optional Version Control
+#'
+#' Ensures that specified R packages are installed and loaded, optionally using
+#' \pkg{pak} for efficient installation or \pkg{groundhog} for reproducible
+#' versioned installations. The function handles missing packages, installs
+#' dependencies, sets repository sources, and provides informative messages
+#' about installation and loading status.
+#'
+#' @param pkgs Character vector of package names to install and load.
+#' @param date Optional character string in the format \code{"YYYY-MM-DD"} specifying
+#'   a CRAN snapshot date. If provided, the function uses the corresponding Posit Package
+#'   Manager repository (\url{https://packagemanager.posit.co/}) for reproducibility.
+#'   Required if \code{groundhog = TRUE}.
+#' @param groundhog Logical; if \code{TRUE}, uses the \pkg{groundhog} package to
+#'   load packages at the specific version available on the given date. Defaults to \code{FALSE}.
+#' @param pak_quiet Logical; if \code{TRUE} (default), suppresses verbose output
+#'   from \pkg{pak} during installation.
+#'
+#' @details
+#' This function performs the following steps:
+#' \enumerate{
+#'   \item Checks whether requested packages are already installed.
+#'   \item Optionally installs and uses \pkg{pak} for efficient package installation.
+#'   \item Optionally installs and uses \pkg{groundhog} for reproducible version loading.
+#'   \item Falls back to base R \code{install.packages()} if necessary.
+#'   \item Sets the CRAN repository URL, optionally tied to a date snapshot.
+#'   \item Loads all requested packages, reporting any that fail to load.
+#' }
+#'
+#' The function automatically installs \pkg{pak} if missing, attempting both
+#' CRAN installation and the official bootstrap script if needed. If packages
+#' are newly installed or updated, a restart of the R session may be required
+#' to ensure all dependencies load properly.
+#'
+#' @return
+#' A named character vector (invisible) of loaded package versions, with
+#' \code{NA} for any packages that failed to load.
+#'
+#' @note
+#' - Include \pkg{pak} and \pkg{groundhog} in your \code{Suggests} field if used.
+#' - The helper function internally suppresses warnings during installation to
+#'   maintain a clean console output.
+#' - It is recommended to restart R after major updates or new installations.
+#'
+#' @examples
+#' \dontrun{
+#' # Standard installation and loading
+#' install_load_packages(c("dplyr", "ggplot2"))
+#'
+#' # Using a CRAN snapshot for reproducibility
+#' install_load_packages(c("dplyr", "ggplot2"), date = "2023-01-01")
+#'
+#' # Using groundhog for strict version control
+#' install_load_packages(c("dplyr", "ggplot2"), groundhog = TRUE, date = "2023-01-01")
+#' }
+#'
+#' @importFrom utils install.packages packageVersion
+#' @importFrom utils installed.packages
+#' @importFrom base requireNamespace library
+#'
+#' @export
 install_load_packages <- function(pkgs, date = NULL, groundhog = FALSE, pak_quiet = TRUE) {
   
   # --- Helper: quiet install with base R ---

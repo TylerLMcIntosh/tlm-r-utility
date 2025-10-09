@@ -358,6 +358,101 @@ access_data_welty_jeffries <- function(bbox_str, epsg_n, where_param = "1=1", ti
 
 # Social data ----
 
+
+#' Access Nelson Accessibility Data for Urban Travel Time (2015)
+#'
+#' Downloads and reads a raster layer representing estimated travel time to the nearest urban area in 2015,
+#' based on varying urban population thresholds.
+#' The raster is streamed directly from Figshare using GDAL's VSI Curl mechanism.
+#'
+#' @param filenum Integer in the range 1 to 12, indicating which urban population threshold to use.
+#' Each number corresponds to a different city size range:
+#' \itemize{
+#'   \item \code{1}: 5,000,000–50,000,000
+#'   \item \code{2}: 1,000,000–5,000,000
+#'   \item \code{3}: 500,000–1,000,000
+#'   \item \code{4}: 200,000–500,000
+#'   \item \code{5}: 100,000–200,000
+#'   \item \code{6}: 50,000–100,000
+#'   \item \code{7}: 20,000–50,000
+#'   \item \code{8}: 10,000–20,000
+#'   \item \code{9}: 5,000–10,000
+#'   \item \code{10}: 20,000–110,000,000
+#'   \item \code{11}: 50,000–50,000,000
+#'   \item \code{12}: 5,000–110,000,000
+#' }
+#'
+#' @return A named list with two elements:
+#' \describe{
+#'   \item{raster}{A \code{SpatRaster} object from the \pkg{terra} package containing travel time in minutes to the nearest urban area.}
+#'   \item{city_size_range}{A character string indicating the population range used for the selected layer.}
+#' }
+#'
+#' @details
+#' The metadata are available at:
+#' \url{https://figshare.com/articles/dataset/Travel_time_to_cities_and_ports_in_the_year_2015/7638134}
+#' Cite Nelson et al. 2019.
+#'
+#' Each raster cell value represents estimated travel time (in minutes) to the nearest urban area based on population.
+#' Missing data are encoded as 65535. Units are minutes.
+#'
+#' @importFrom terra rast
+#' @importFrom glue glue
+#'
+#' @export
+access_data_nelson_accessibility <- function(filenum) {
+  if (filenum == 1) {
+    url <- "https://figshare.com/ndownloader/files/14189804"
+    city_size_range <- "5000000-50000000"
+  } else if (filenum == 2) {
+    url <- "https://figshare.com/ndownloader/files/14189807"
+    city_size_range <- "1000000-5000000"
+  } else if (filenum == 3) {
+    url <- "https://figshare.com/ndownloader/files/14189810"
+    city_size_range <- "500000-1000000"
+  } else if (filenum == 4) {
+    url <- "https://figshare.com/ndownloader/files/14189816"
+    city_size_range <- "200000-500000"
+  } else if (filenum == 5) {
+    url <- "https://figshare.com/ndownloader/files/14189819"
+    city_size_range <- "100000-200000"
+  } else if (filenum == 6) {
+    url <- "https://figshare.com/ndownloader/files/14189825"
+    city_size_range <- "50000-100000"
+  } else if (filenum == 7) {
+    url <- "https://figshare.com/ndownloader/files/14189831"
+    city_size_range <- "20000-50000"
+  } else if (filenum == 8) {
+    url <- "https://figshare.com/ndownloader/files/14189837"
+    city_size_range <- "10000-20000"
+  } else if (filenum == 9) {
+    url <- "https://figshare.com/ndownloader/files/14189840"
+    city_size_range <- "5000-10000"
+  } else if (filenum == 10) {
+    url <- "https://figshare.com/ndownloader/files/14189843"
+    city_size_range <- "20000-110000000"
+  } else if (filenum == 11) {
+    url <- "https://figshare.com/ndownloader/files/14189849"
+    city_size_range <- "50000-50000000"
+  } else if (filenum == 12) {
+    url <- "https://figshare.com/ndownloader/files/14189852"
+    city_size_range <- "5000-110000000"
+  } else {
+    stop("Invalid filenum. Must be between 1 and 12.")
+  }
+  
+  # Stream the raster via VSI
+  r <- glue::glue("/vsicurl/", url) |> terra::rast()
+  
+  # Return both the raster and metadata
+  outs <- list(
+    raster = r,
+    city_size_range = city_size_range
+  )
+  
+  return(outs)
+}
+
 #A function to access road data from OSM
 # PARAMETERS
 # aoi :: an area of interest as an sf object - roads will be accessed within the area plus a 1km buffer
