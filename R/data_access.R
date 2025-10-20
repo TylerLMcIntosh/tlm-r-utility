@@ -215,73 +215,345 @@ get_arcgis_online_token <- function() {
 }
 
 
-#' Fetch Data from an ArcGIS REST API Endpoint with Pagination
+
+#' Streamlined access to ArcGIS Feature Service layers (with pagination & optional spatial filter)
 #'
-#' This function retrieves GeoJSON data from an ArcGIS REST API endpoint using pagination.
-#' It checks for valid content and stops if the server returns an error page.
+#' @description
+#' A general-purpose helper to pull data from an ArcGIS REST Feature *Layer* endpoint.
+#' The function:
+#' - Inspects layer metadata to auto-detect `maxRecordCount`, spatial reference (CRS), and supported formats.
+#' - Paginates through all records by default (using result offsets or objectId chunking if pagination isn't supported).
+#' - Returns a single `sf` object of all combined features.
+#' - Optionally applies a server-side spatial filter using a supplied `region` (`sf`) — by default via the region's bounding box for maximal compatibility.
+#' - Allows custom `query_params` to override defaults (e.g., WHERE clauses, specific fields).
 #'
-#' @param base_url A character string. The base URL of the ArcGIS REST API endpoint.
-#' @param query_params A list. Query parameters required by the API, such as `where`, `outFields`, and `f`.
-#' @param max_record An integer. Max records to fetch in a single request.
-#' @param n An integer or "all". Total records to fetch.
-#' @param timeout An integer. Request timeout in seconds.
+#' It prefers `f=geojson` when the layer supports it (fast path via \pkg{geojsonsf} if available),
+#' and otherwise falls back to EsriJSON parsing via GDAL/\pkg{sf}.
 #'
-#' @return An `sf` object of combined fetched features.
+#' @param url Character. URL to the Feature Layer (e.g., `.../FeatureServer/0`) or layer `query` endpoint.
+#' @param region Optional `sf` object. If provided, the server query is spatially filtered to features
+#'   intersecting \emph{the region's bounding box} (robust across services). Set `use_region_bbox = FALSE`
+#'   to use the exact polygon(s) envelope instead of the bbox if you prefer (still sent as an envelope on the server).
+#' @param query_params Optional named list of additional/override query params passed to the REST `query` endpoint.
+#'   Examples: `list(where = "STATUS = 'Active'", outFields = "OBJECTID,NAME")`.
+#'   Any provided names here override the defaults below.
+#' @param n One of `"all"` (default) or a positive integer. Total number of features to fetch.
+#'   If `"all"`, the function paginates until all features are retrieved.
+#' @param out_crs One of `NULL` (default; returns in layer native CRS) or an EPSG integer (e.g., `4326`) or a valid `sf::st_crs()` input.
+#'   If provided, the returned `sf` will be transformed to this CRS *client-side*.
+#' @param timeout Numeric (seconds). HTTP request timeout. Default `300`.
+#' @param progress Logical. Print progress messages. Default `TRUE`.
+#' @param use_region_bbox Logical. If `TRUE` (default) and `region` is supplied, uses the region's bounding box for the spatial filter
+#'   (more compatible and typically faster). If `FALSE`, uses the envelope of the unioned polygons (still an axis-aligned envelope).
+#'
+#' @returns An `sf` object of all fetched features (possibly empty if no matches).
 #' @export
-access_data_get_x_from_arcgis_rest_api_geojson <- function(base_url, query_params, max_record, n, timeout) {
-  if (!is.character(base_url) || length(base_url) != 1) stop("Parameter 'base_url' must be a single character string.")
-  if (!is.list(query_params)) stop("Parameter 'query_params' must be a list.")
-  if (!is.numeric(max_record) || max_record <= 0) stop("Parameter 'max_record' must be a positive integer.")
-  if (!is.numeric(timeout) || timeout <= 0) stop("Parameter 'timeout' must be a positive integer.")
+#'
+#' @examples
+#' \dontrun{
+#' # Pull an entire layer
+#' sf_all <- access_data_arcgis_rest_feature_streamlined(
+#'   url = "https://services.arcgis.com/.../FeatureServer/0"
+#' )
+#'
+#' # Pull with a server-side WHERE filter and only selected fields
+#' fires <- access_data_arcgis_rest_feature_streamlined(
+#'   url = "https://services.arcgis.com/.../FeatureServer/0",
+#'   query_params = list(where = "YEAR >= 2020", outFields = "OBJECTID,NAME,YEAR")
+#' )
+#'
+#' # Limit the query to a spatial region
+#' library(sf)
+#' region <- st_as_sfc(st_bbox(c(xmin=-106, ymin=39.5, xmax=-104.5, ymax=40.5), crs = 4326)) |> st_as_sf()
+#' bbox_hits <- access_data_arcgis_rest_feature_streamlined(
+#'   url = "https://services.arcgis.com/.../FeatureServer/0",
+#'   region = region
+#' )
+#' }
+access_data_arcgis_rest_feature_streamlined <- function(
+    url,
+    region = NULL,
+    query_params = NULL,
+    n = "all",
+    out_crs = NULL,
+    timeout = 300,
+    progress = TRUE,
+    use_region_bbox = TRUE
+) {
   
-  total_features <- list()
-  offset <- 0
-  total_fetched <- 0
-  fetch_all <- identical(n, "all")
+  # Small helper for NULL coalescing within this function's scope
+  `%||%` <- function(a, b) if (!is.null(a)) a else b
   
-  if (!fetch_all && (!is.numeric(n) || n <= 0)) {
-    stop("Parameter 'n' must be a positive integer or 'all'.")
+  # --- Validate inputs ---
+  stopifnot(is.character(url), length(url) == 1L)
+  if (!is.null(region) && !inherits(region, "sf")) stop("'region' must be an 'sf' object if provided.")
+  if (!(identical(n, "all") || (is.numeric(n) && n > 0))) stop("'n' must be 'all' or a positive integer.")
+  if (!is.null(out_crs)) {
+    # will be applied at the end (client-side) for robustness
+    out_crs <- sf::st_crs(out_crs)
+    if (is.na(out_crs)) stop("'out_crs' is not a valid CRS.")
   }
   
-  repeat {
-    query_params$resultOffset <- offset
-    query_params$resultRecordCount <- max_record
-    
-    response <- httr::GET(url = base_url, query = query_params, httr::timeout(timeout))
-    
-    # Check for valid content type
-    resp_type <- httr::headers(response)[["content-type"]]
-    if (!grepl("geo\\+json|application/json", resp_type)) {
-      error_message <- httr::content(response, "text", encoding = "UTF-8")
-      stop("Received non-GeoJSON content. Likely an error page:\n", substr(error_message, 1, 500))
+  # --- Normalize URLs and derive endpoints ---
+  trim_trailing_slash <- function(x) sub("/+$", "", x)
+  url <- trim_trailing_slash(url)
+  
+  # If the URL already ends with "/query", use it and infer the layer URL by removing /query
+  is_query_endpoint <- grepl("/query$", url, ignore.case = TRUE)
+  layer_url <- if (is_query_endpoint) sub("/query$", "", url, ignore.case = TRUE) else url
+  query_url <- paste0(layer_url, "/query")  # we always hit /query for data
+  
+  # --- Helper for GET with timeout ---
+  do_get <- function(u, q) {
+    httr::GET(u, query = q, httr::timeout(timeout))
+  }
+  
+  # --- Fetch layer metadata (JSON) to discover settings ---
+  meta_resp <- do_get(layer_url, list(f = "json"))
+  if (httr::http_error(meta_resp)) {
+    stop("Failed to fetch layer metadata: HTTP ", httr::status_code(meta_resp))
+  }
+  meta_txt <- httr::content(meta_resp, as = "text", encoding = "UTF-8")
+  meta <- jsonlite::fromJSON(meta_txt, simplifyVector = TRUE)
+  
+  # Basic sanity check (ArcGIS layer metadata typically has 'geometryType' and 'fields')
+  if (is.null(meta$type) && is.null(meta$geometryType) && is.null(meta$fields)) {
+    stop("The provided URL doesn't seem to be a valid Feature Layer endpoint: ", layer_url)
+  }
+  
+  # --- Discover capabilities from metadata ---
+  # max record count
+  max_record_candidates <- c(meta$maxRecordCount, meta$standardMaxRecordCount, meta$tileMaxRecordCount)
+  max_record_candidates <- max_record_candidates[is.finite(max_record_candidates)]
+  max_record <- if (length(max_record_candidates)) max(max_record_candidates, na.rm = TRUE) else 1000L
+  
+  # supported formats
+  supported_formats <- tolower(strsplit(meta$supportedQueryFormats %||% "", ",")[[1]])
+  supports_geojson <- "geojson" %in% supported_formats
+  
+  # pagination and advanced querying
+  adv <- meta$advancedQueryCapabilities
+  supports_pagination <- isTRUE(meta$supportsPagination) || isTRUE(adv$supportsPagination)
+  supports_order_by <- isTRUE(adv$supportsOrderBy)
+  
+  # layer spatial reference
+  layer_wkid <- meta$extent$spatialReference$latestWkid %||%
+    meta$extent$spatialReference$wkid
+  # Not all services provide WKID; if missing, we'll default geometry params to WGS84 (4326)
+  in_wkid <- if (!is.null(layer_wkid) && is.finite(layer_wkid)) layer_wkid else 4326
+  
+  # --- Build baseline query defaults (overridable by user) ---
+  # We always ask for geometry + all fields unless overridden.
+  # NOTE: outSR is set to the layer's own CRS for server-side stability; we'll project client-side if requested.
+  defaults <- list(
+    where = "1=1",
+    outFields = "*",
+    returnGeometry = "true",
+    spatialRel = "esriSpatialRelIntersects",
+    outSR = in_wkid
+  )
+  
+  # Add format preference: prefer geojson if supported, else json (EsriJSON)
+  if (supports_geojson) {
+    defaults$f <- "geojson"
+  } else {
+    defaults$f <- "json"
+  }
+  
+  # Merge user overrides
+  if (!is.null(query_params)) {
+    if (!is.list(query_params)) stop("'query_params' must be a named list.")
+    # coerce logicals to JS-style "true"/"false" strings for safety
+    query_params <- lapply(query_params, function(v) {
+      if (isTRUE(v)) return("true")
+      if (identical(v, FALSE)) return("false")
+      v
+    })
+  }
+  q <- modifyList(defaults, query_params %||% list(), keep.null = TRUE)
+  
+  # --- Optional spatial filter via region (using an axis-aligned envelope for broad compatibility) ---
+  if (!is.null(region)) {
+    # Ensure region has a valid geometry
+    if (!any(grepl("^sfc_", class(sf::st_geometry(region))))) {
+      stop("'region' must contain a geometry column.")
+    }
+    # Choose geometry to send: envelope of region or just bbox
+    geom_to_env <- if (use_region_bbox) {
+      sf::st_as_sfc(sf::st_bbox(region))
+    } else {
+      # envelope of the union (still an axis-aligned rectangle)
+      sf::st_as_sfc(sf::st_bbox(sf::st_union(sf::st_make_valid(region))))
+    }
+    # Reproject to in_wkid for server-side 'inSR' correctness (if possible)
+    safe_crs <- tryCatch(sf::st_crs(in_wkid), error = function(e) NULL)
+    if (!is.null(safe_crs) && !is.na(safe_crs)) {
+      geom_env <- sf::st_transform(geom_to_env, sf::st_crs(in_wkid))
+      inSR_param <- in_wkid
+    } else {
+      # fallback to WGS84 for inSR/geometry
+      geom_env <- sf::st_transform(geom_to_env, 4326)
+      inSR_param <- 4326
+      # ensure outSR stays consistent with server capability; we keep outSR=in_wkid
     }
     
-    # Attempt to read GeoJSON as sf
-    data <- tryCatch({
-      sf::st_read(httr::content(response, as = "text", encoding = "UTF-8"), quiet = TRUE)
-    }, error = function(e) {
-      stop("Failed to parse GeoJSON at offset ", offset, ": ", e$message)
+    bb <- sf::st_bbox(geom_env)
+    q$geometry <- jsonlite::toJSON(
+      list(xmin = unname(bb["xmin"]),
+           ymin = unname(bb["ymin"]),
+           xmax = unname(bb["xmax"]),
+           ymax = unname(bb["ymax"]),
+           spatialReference = list(wkid = inSR_param)),
+      auto_unbox = TRUE
+    )
+    q$geometryType <- "esriGeometryEnvelope"
+    q$inSR <- inSR_param
+  }
+  
+  # --- Helper to parse a single response payload into sf ---
+  parse_to_sf <- function(resp, expecting_geojson = supports_geojson) {
+    txt <- httr::content(resp, as = "text", encoding = "UTF-8")
+    ctype <- httr::headers(resp)[["content-type"]] %||% ""
+    
+    tf <- tempfile(fileext = if (expecting_geojson) ".geojson" else ".json")
+    writeLines(txt, tf, useBytes = TRUE)
+    on.exit(unlink(tf), add = TRUE)
+    
+    suppressWarnings({
+      res <- try(sf::st_read(tf, quiet = TRUE), silent = TRUE)
+      if (inherits(res, "try-error") || nrow(res) == 0) {
+        # fallback: try geojsonsf if installed
+        if (requireNamespace("geojsonsf", quietly = TRUE)) {
+          return(tryCatch(geojsonsf::geojson_sf(txt), error = function(e) NULL))
+        }
+      }
+      res
     })
-    
-    # Append and track
-    total_features <- append(total_features, list(data))
-    fetched_now <- nrow(data)
-    total_fetched <- total_fetched + fetched_now
-    cat(sprintf("Fetched %d records so far...\n", total_fetched))
-    
-    # Stop if fewer than max or we hit the user-defined limit
-    if (fetched_now < max_record || (!fetch_all && total_fetched >= n)) break
-    
-    offset <- offset + max_record
   }
   
-  all_data_sf <- do.call(rbind, total_features)
-  if (!fetch_all) {
-    all_data_sf <- all_data_sf[1:min(n, nrow(all_data_sf)), ]
+  # --- Helper: fetch objectIds when pagination isn't supported ---
+  get_all_object_ids <- function() {
+    resp <- do_get(query_url, c(q, list(f = "json", returnIdsOnly = "true", returnCountOnly = "false")))
+    if (httr::http_error(resp)) {
+      stop("Failed to fetch object IDs: HTTP ", httr::status_code(resp))
+    }
+    js <- jsonlite::fromJSON(httr::content(resp, "text", encoding = "UTF-8"), simplifyVector = TRUE)
+    if (is.null(js$objectIds) || length(js$objectIds) == 0) return(integer(0))
+    # Respect optional orderBy if supported (stable paging)
+    if (isTRUE(supports_order_by) && !is.null(js$objectIds)) {
+      return(sort(js$objectIds))
+    }
+    js$objectIds
   }
   
-  return(all_data_sf)
+  # --- Pull data, paginating as needed ---
+  total <- list()
+  total_fetched <- 0L
+  fetch_all <- identical(n, "all")
+  page_size <- as.integer(max_record)
+  if (!isTRUE(page_size > 0)) page_size <- 1000L
+  
+  if (supports_pagination) {
+    # Offset-based pagination (resultOffset/resultRecordCount)
+    offset <- 0L
+    repeat {
+      q_page <- modifyList(q, list(resultOffset = offset, resultRecordCount = page_size), keep.null = TRUE)
+      resp <- do_get(query_url, q_page)
+      sf_page <- parse_to_sf(resp)
+      
+      # If service returns an empty page, stop.
+      n_now <- nrow(sf_page)
+      if (is.na(n_now) || n_now == 0L) break
+      
+      total[[length(total) + 1L]] <- sf_page
+      total_fetched <- total_fetched + n_now
+      if (isTRUE(progress)) message(sprintf("Fetched %d records...", total_fetched))
+      
+      # Stop if user limit reached
+      if (!fetch_all && total_fetched >= n) break
+      
+      # If fewer than page_size, we reached the end
+      if (n_now < page_size) break
+      
+      offset <- offset + page_size
+    }
+  } else {
+    # No pagination support: chunk by objectIds
+    oids <- get_all_object_ids()
+    if (length(oids) == 0L) {
+      if (isTRUE(progress)) message("No matching features (empty objectId set).")
+      return(sf::st_as_sf(sf::st_sfc(), crs = if (!is.null(layer_wkid)) layer_wkid else NA))
+    }
+    
+    # If user requested a limited 'n', truncate the OID list
+    if (!fetch_all) {
+      oids <- oids[seq_len(min(length(oids), n))]
+    }
+    
+    # Chunk OIDs into batches of page_size
+    split_idx <- split(oids, ceiling(seq_along(oids) / page_size))
+    for (ids in split_idx) {
+      # objectIds are passed as comma-separated string
+      q_batch <- modifyList(q, list(objectIds = paste(ids, collapse = ",")), keep.null = TRUE)
+      # When objectIds are used, resultOffset isn't needed/used by the server
+      q_batch$resultOffset <- NULL
+      q_batch$resultRecordCount <- NULL
+      
+      # Force format to something parsable; prefer geojson if supported, else json
+      q_batch$f <- if (supports_geojson) "geojson" else "json"
+      
+      resp <- do_get(query_url, q_batch)
+      sf_page <- parse_to_sf(resp)
+      
+      n_now <- nrow(sf_page)
+      if (is.na(n_now) || n_now == 0L) next
+      
+      total[[length(total) + 1L]] <- sf_page
+      total_fetched <- total_fetched + n_now
+      if (isTRUE(progress)) message(sprintf("Fetched %d records...", total_fetched))
+    }
+  }
+  
+  # --- Bind results, enforce field alignment & geometry validity ---
+  if (length(total) == 0L) {
+    if (isTRUE(progress)) message("Query returned 0 features.")
+    # Return an empty sf with the discovered CRS if possible
+    empty <- sf::st_as_sf(sf::st_sfc(), crs = if (!is.null(layer_wkid)) layer_wkid else NA)
+    return(empty)
+  }
+  
+  # Bind rows robustly
+  # Use base rbind on sf (sf handles column alignment, fills with NA)
+  out <- total[[1L]]
+  if (length(total) > 1L) {
+    for (i in 2:length(total)) out <- rbind(out, total[[i]])
+  }
+  
+  # Make valid geometries when possible
+  # (Avoid expensive validation on massive datasets unless geometry type suggests issues)
+  suppressWarnings({
+    try(out <- sf::st_make_valid(out), silent = TRUE)
+  })
+  
+  # Client-side reprojection if requested
+  if (!is.null(out_crs)) {
+    suppressWarnings({
+      out <- sf::st_transform(out, out_crs)
+    })
+  }
+  
+  # Respect 'n' if user asked for a subset and pagination returned > n
+  if (!fetch_all && nrow(out) > n) {
+    out <- out[seq_len(n), ]
+  }
+  
+  # Return as sf
+  out
 }
+
+
+
+
 
 
 
@@ -1468,4 +1740,72 @@ access_neon_domains_shp <- function() {
 #'   googledrive::drive_download(googledrive::as_id(id), path = localPath, overwrite = TRUE)
 #' }
 
+#' 
+#' #' Fetch Data from an ArcGIS REST API Endpoint with Pagination
+#' #'
+#' #' This function retrieves GeoJSON data from an ArcGIS REST API endpoint using pagination.
+#' #' It checks for valid content and stops if the server returns an error page.
+#' #'
+#' #' @param base_url A character string. The base URL of the ArcGIS REST API endpoint.
+#' #' @param query_params A list. Query parameters required by the API, such as `where`, `outFields`, and `f`.
+#' #' @param max_record An integer. Max records to fetch in a single request.
+#' #' @param n An integer or "all". Total records to fetch.
+#' #' @param timeout An integer. Request timeout in seconds.
+#' #'
+#' #' @return An `sf` object of combined fetched features.
+#' #' @export
+#' access_data_get_x_from_arcgis_rest_api_geojson <- function(base_url, query_params, max_record, n, timeout) {
+#'   if (!is.character(base_url) || length(base_url) != 1) stop("Parameter 'base_url' must be a single character string.")
+#'   if (!is.list(query_params)) stop("Parameter 'query_params' must be a list.")
+#'   if (!is.numeric(max_record) || max_record <= 0) stop("Parameter 'max_record' must be a positive integer.")
+#'   if (!is.numeric(timeout) || timeout <= 0) stop("Parameter 'timeout' must be a positive integer.")
+#'   
+#'   total_features <- list()
+#'   offset <- 0
+#'   total_fetched <- 0
+#'   fetch_all <- identical(n, "all")
+#'   
+#'   if (!fetch_all && (!is.numeric(n) || n <= 0)) {
+#'     stop("Parameter 'n' must be a positive integer or 'all'.")
+#'   }
+#'   
+#'   repeat {
+#'     query_params$resultOffset <- offset
+#'     query_params$resultRecordCount <- max_record
+#'     
+#'     response <- httr::GET(url = base_url, query = query_params, httr::timeout(timeout))
+#'     
+#'     # Check for valid content type
+#'     resp_type <- httr::headers(response)[["content-type"]]
+#'     if (!grepl("geo\\+json|application/json", resp_type)) {
+#'       error_message <- httr::content(response, "text", encoding = "UTF-8")
+#'       stop("Received non-GeoJSON content. Likely an error page:\n", substr(error_message, 1, 500))
+#'     }
+#'     
+#'     # Attempt to read GeoJSON as sf
+#'     data <- tryCatch({
+#'       sf::st_read(httr::content(response, as = "text", encoding = "UTF-8"), quiet = TRUE)
+#'     }, error = function(e) {
+#'       stop("Failed to parse GeoJSON at offset ", offset, ": ", e$message)
+#'     })
+#'     
+#'     # Append and track
+#'     total_features <- append(total_features, list(data))
+#'     fetched_now <- nrow(data)
+#'     total_fetched <- total_fetched + fetched_now
+#'     cat(sprintf("Fetched %d records so far...\n", total_fetched))
+#'     
+#'     # Stop if fewer than max or we hit the user-defined limit
+#'     if (fetched_now < max_record || (!fetch_all && total_fetched >= n)) break
+#'     
+#'     offset <- offset + max_record
+#'   }
+#'   
+#'   all_data_sf <- do.call(rbind, total_features)
+#'   if (!fetch_all) {
+#'     all_data_sf <- all_data_sf[1:min(n, nrow(all_data_sf)), ]
+#'   }
+#'   
+#'   return(all_data_sf)
+#' }
 
