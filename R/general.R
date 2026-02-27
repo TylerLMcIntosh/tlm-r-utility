@@ -308,6 +308,87 @@ safe_download <- function(url,
 }
 
 
+#' Safe Unzip a File (with Optional Recursive Unzipping and ZIP Cleanup)
+#'
+#' Safely unzips a ZIP file to a specified directory (using utils::unzip). Supports skipping extraction if files or top-level folder already exist, recursive unzipping of nested ZIPs, and optional deletion of ZIP files.
+#'
+#' @param zip_path Character. Path to the local ZIP file.
+#' @param extract_to Character. Directory where the contents should be extracted. Defaults to the ZIP's directory.
+#' @param recursive Logical. If TRUE, recursively unzip nested ZIP files. Defaults to FALSE.
+#' @param keep_zip Logical. If FALSE, deletes the original ZIP and any nested ZIPs after unzipping. Defaults to TRUE.
+#' @param full_contents_check Logical. If TRUE, skip unzip only if all expected files exist. If FALSE (default), skip unzip if the top-level directory exists.
+#' @param return_all_paths Logical. If TRUE, returns full paths to all extracted files. If FALSE (default), returns only the top-level directory path.
+#'
+#' @return A character vector of extracted file paths (if \code{return_all_paths = TRUE}) or a single path to the top-level extracted directory (if \code{return_all_paths = FALSE}).
+#'
+#' @importFrom utils unzip
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' # Recursively unzip and delete all ZIPs, return full paths
+#' files <- safe_unzip("data/archive.zip", recursive = TRUE, keep_zip = FALSE, return_all_paths = TRUE)
+#'
+#' # Unzip only if top folder doesn't exist, return folder path
+#' folder <- safe_unzip("data/archive.zip", full_contents_check = FALSE, return_all_paths = FALSE)
+#' }
+safe_unzip <- function(zip_path,
+                       extract_to = dirname(zip_path),
+                       recursive = FALSE,
+                       keep_zip = TRUE,
+                       full_contents_check = FALSE,
+                       return_all_paths = FALSE) {
+  # Validate inputs
+  if (!file.exists(zip_path)) stop("ZIP file does not exist: ", zip_path)
+  if (!is.character(extract_to) || length(extract_to) != 1) stop("`extract_to` must be a single character string.")
+  if (!is.logical(recursive) || length(recursive) != 1) stop("`recursive` must be a single logical value.")
+  if (!is.logical(keep_zip) || length(keep_zip) != 1) stop("`keep_zip` must be a single logical value.")
+  if (!is.logical(full_contents_check) || length(full_contents_check) != 1) stop("`full_contents_check` must be logical.")
+  if (!is.logical(return_all_paths) || length(return_all_paths) != 1) stop("`return_all_paths` must be logical.")
+  
+  # Get ZIP listing and top-level directory
+  zip_listing <- utils::unzip(zip_path, list = TRUE, setTimes = FALSE)
+  top_level_dirs <- unique(sub("/.*", "", zip_listing$Name))
+  top_dir_path <- file.path(extract_to, top_level_dirs[1])
+  
+  # Determine whether to skip unzip
+  skip_unzip <- FALSE
+  if (full_contents_check) {
+    expected_paths <- file.path(extract_to, zip_listing$Name)
+    skip_unzip <- all(file.exists(expected_paths))
+  } else {
+    skip_unzip <- dir.exists(top_dir_path)
+  }
+  
+  if (!skip_unzip) {
+    if (!dir.exists(extract_to)) dir.create(extract_to, recursive = TRUE)
+    tryCatch({
+      utils::unzip(zip_path, exdir = extract_to, setTimes = FALSE)
+    }, error = function(e) {
+      stop("Failed to unzip: ", e$message)
+    })
+    
+    if (recursive) {
+      nested_zips <- list.files(extract_to, pattern = "\\.zip$", recursive = TRUE, full.names = TRUE)
+      for (nz in nested_zips) {
+        utils::unzip(nz, exdir = dirname(nz), setTimes = FALSE)
+        if (!keep_zip) unlink(nz)
+      }
+    }
+    
+    if (!keep_zip) unlink(zip_path)
+  } else {
+    message("Skipping unzip: Extraction target(s) already exist in ", extract_to)
+  }
+  
+  if (return_all_paths) {
+    all_files <- list.files(extract_to, recursive = TRUE, full.names = TRUE)
+    file_paths <- all_files[file.info(all_files)$isdir == FALSE]
+    return(invisible(normalizePath(file_paths, winslash = "/", mustWork = FALSE)))
+  } else {
+    return(invisible(normalizePath(top_dir_path, winslash = "/", mustWork = FALSE)))
+  }
+}
 
 #' Recursively List Full Directory Contents
 #'
@@ -371,51 +452,20 @@ write_session_info <- function(path) {
 #'   load packages at the specific version available on the given date. Defaults to \code{FALSE}.
 #' @param pak_quiet Logical; if \code{TRUE} (default), suppresses verbose output
 #'   from \pkg{pak} during installation.
+#' @param try_pak Logical; if \code{TRUE} (default), attempts to use \pkg{pak}
+#'   (installing it if needed) for faster installs. If \code{FALSE}, skips
+#'   all \pkg{pak} logic and uses the base fallback installer only.
 #'
-#' @details
-#' This function performs the following steps:
-#' \enumerate{
-#'   \item Checks whether requested packages are already installed.
-#'   \item Optionally installs and uses \pkg{pak} for efficient package installation.
-#'   \item Optionally installs and uses \pkg{groundhog} for reproducible version loading.
-#'   \item Falls back to base R \code{install.packages()} if necessary.
-#'   \item Sets the CRAN repository URL, optionally tied to a date snapshot.
-#'   \item Loads all requested packages, reporting any that fail to load.
-#' }
-#'
-#' The function automatically installs \pkg{pak} if missing, attempting both
-#' CRAN installation and the official bootstrap script if needed. If packages
-#' are newly installed or updated, a restart of the R session may be required
-#' to ensure all dependencies load properly.
-#'
-#' @return
-#' A named character vector (invisible) of loaded package versions, with
-#' \code{NA} for any packages that failed to load.
-#'
-#' @note
-#' - Include \pkg{pak} and \pkg{groundhog} in your \code{Suggests} field if used.
-#' - The helper function internally suppresses warnings during installation to
-#'   maintain a clean console output.
-#' - It is recommended to restart R after major updates or new installations.
-#'
-#' @examples
-#' \dontrun{
-#' # Standard installation and loading
-#' install_load_packages(c("dplyr", "ggplot2"))
-#'
-#' # Using a CRAN snapshot for reproducibility
-#' install_load_packages(c("dplyr", "ggplot2"), date = "2023-01-01")
-#'
-#' # Using groundhog for strict version control
-#' install_load_packages(c("dplyr", "ggplot2"), groundhog = TRUE, date = "2023-01-01")
-#' }
-#'
-#' @importFrom utils install.packages packageVersion
-#' @importFrom utils installed.packages
+#' @importFrom utils install.packages packageVersion installed.packages
 #' @importFrom base requireNamespace library
-#'
 #' @export
-install_load_packages <- function(pkgs, date = NULL, groundhog = FALSE, pak_quiet = TRUE) {
+install_load_packages <- function(
+    pkgs,
+    date = NULL,
+    groundhog = FALSE,
+    pak_quiet = TRUE,
+    try_pak = TRUE
+) {
   
   # --- Helper: quiet install with base R ---
   safe_install <- function(pkg, repos = "https://cloud.r-project.org") {
@@ -431,34 +481,6 @@ install_load_packages <- function(pkgs, date = NULL, groundhog = FALSE, pak_quie
   
   if (length(missing_pkgs) == 0) {
     message("All requested packages are already installed.")
-  }
-  
-  # --- Only ensure pak if actually needed ---
-  has_pak <- requireNamespace("pak", quietly = TRUE)
-  if (length(missing_pkgs) > 0 && !has_pak) {
-    message("Some packages are missing; installing 'pak'...")
-    
-    pak_install_success <- FALSE
-    try({
-      suppressWarnings(
-        install.packages("pak", repos = "https://cloud.r-project.org", dependencies = TRUE)
-      )
-      pak_install_success <- requireNamespace("pak", quietly = TRUE)
-    }, silent = TRUE)
-    
-    if (!pak_install_success) {
-      message("Standard install failed; trying pak bootstrap installer...")
-      try({
-        source("https://pak.r-lib.org/install.R")
-        pak_install_success <- requireNamespace("pak", quietly = TRUE)
-      }, silent = TRUE)
-    }
-    
-    if (!pak_install_success) {
-      warning("Failed to install 'pak' by any method; will fall back to base installers only.")
-    }
-    
-    has_pak <- requireNamespace("pak", quietly = TRUE)
   }
   
   # --- Optionally ensure groundhog ---
@@ -481,13 +503,46 @@ install_load_packages <- function(pkgs, date = NULL, groundhog = FALSE, pak_quie
   message("Using CRAN repository: ", repo)
   options(repos = c(CRAN = repo))
   
+  # --- pak availability/bootstrapping (optional) ---
+  has_pak <- FALSE
+  if (isTRUE(try_pak) && length(missing_pkgs) > 0) {
+    has_pak <- requireNamespace("pak", quietly = TRUE)
+    
+    # Only try to install pak if missing and we're allowed to try pak
+    if (!has_pak) {
+      message("Some packages are missing; installing 'pak'...")
+      
+      pak_install_success <- FALSE
+      try({
+        suppressWarnings(
+          install.packages("pak", repos = "https://cloud.r-project.org", dependencies = TRUE)
+        )
+        pak_install_success <- requireNamespace("pak", quietly = TRUE)
+      }, silent = TRUE)
+      
+      if (!pak_install_success) {
+        message("Standard install failed; trying pak bootstrap installer...")
+        try({
+          source("https://pak.r-lib.org/install.R")
+          pak_install_success <- requireNamespace("pak", quietly = TRUE)
+        }, silent = TRUE)
+      }
+      
+      if (!pak_install_success) {
+        warning("Failed to install 'pak' by any method; will fall back to base installers only.")
+      }
+      
+      has_pak <- requireNamespace("pak", quietly = TRUE)
+    }
+  }
+  
   # --- Install missing packages ---
   installed_or_updated <- FALSE
   
   if (length(missing_pkgs) > 0) {
     message("Missing packages detected: ", paste(missing_pkgs, collapse = ", "))
     
-    if (has_pak) {
+    if (isTRUE(try_pak) && has_pak) {
       tryCatch({
         if (pak_quiet) {
           message("Attempting install with pak (quietly)...")
@@ -498,15 +553,19 @@ install_load_packages <- function(pkgs, date = NULL, groundhog = FALSE, pak_quie
           message("Attempting install with pak...")
           pak::pkg_install(missing_pkgs, ask = FALSE, upgrade = FALSE)
         }
-        installed_or_updated <<- TRUE
+        installed_or_updated <- TRUE
       }, error = function(e) {
         message("pak installation failed: ", e$message)
         message("Falling back to install.packages()...")
         for (p in missing_pkgs) safe_install(p, repos = repo)
-        installed_or_updated <<- TRUE
+        installed_or_updated <- TRUE
       })
     } else {
-      message("pak unavailable; installing missing packages with install.packages()...")
+      if (!isTRUE(try_pak)) {
+        message("try_pak = FALSE; installing missing packages with install.packages()...")
+      } else {
+        message("pak unavailable; installing missing packages with install.packages()...")
+      }
       for (p in missing_pkgs) safe_install(p, repos = repo)
       installed_or_updated <- TRUE
     }
@@ -554,6 +613,7 @@ install_load_packages <- function(pkgs, date = NULL, groundhog = FALSE, pak_quie
 }
 
 
+
 # Specialized functions ----
 
 #' Package Existing Data File(s) with Metadata into ZIP
@@ -569,13 +629,15 @@ install_load_packages <- function(pkgs, date = NULL, groundhog = FALSE, pak_quie
 #' @param out_dir Output directory path.
 #' @param data_name_full Full dataset name for metadata.
 #' @param data_name_file Base filename for output (no extension).
+#' @param test TRUE/FALSE - if TRUE, write metadata_test.md file and do not zip data
+#' @param ... Additional parameters to pass to zip::zip
 #'
 #' @return NULL. Writes metadata and zip file to disk.
 #'
 #' @importFrom zip zip
 package_with_metadata <- function(data_file_path, column_names, column_descriptions,
                                   overall_description, author, github_repo,
-                                  out_dir, data_name_full, data_name_file) {
+                                  out_dir, data_name_full, data_name_file, test = FALSE, ...) {
   # Ensure data_file_path is a character vector
   if (!is.character(data_file_path)) {
     stop("data_file_path must be a character string or a character vector.")
@@ -593,30 +655,47 @@ package_with_metadata <- function(data_file_path, column_names, column_descripti
   df_metadata <- cbind(column_names, column_descriptions)
   
   # Create metadata markdown
-  meta_path <- file.path(out_dir, "metadata.md")
+  if(test) {
+    meta_path <- file.path(out_dir, "metadata_test.md")
+  } else {
+    meta_path <- file.path(out_dir, "metadata.md")
+  }
   stamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")
   
   sink(meta_path)
   cat("# Metadata for the ", data_name_full, " dataset\n")
   cat(overall_description, "\n\n")
   cat("## Information\n")
-  cat("Author: ", author, "\n")
-  cat("Date generated: ", stamp, "\n")
-  cat("[GitHub repo with code for reproduction](", github_repo, ")\n\n")
-  cat("## Metadata\n")
-  cat("column_names :: column_descriptions\n")
-  cat(apply(df_metadata, 1, paste, collapse = " :: "), sep = "\n")
+  cat("- **Author:** ", author, "\n")
+  cat("- **Date generated:** ", stamp, "\n")
+  cat("- [GitHub repo with code for reproduction](",github_repo,")\n\n")
+  # cat("## Metadata\n")
+  # cat("column_names :: column_descriptions\n")
+  # cat(apply(df_metadata, 1, paste, collapse = " :: "), sep = "\n")
+  
+  cat("## Metadata\n\n")
+  cat("| Column | Description |\n")
+  cat("|--------|------------|\n")
+  
+  apply(df_metadata, 1, function(row) {
+    cat("|", row[1], "|", row[2], "|\n")
+  })
+  
   sink()
   
-  # Zip files
-  zip_path <- file.path(out_dir, paste0(data_name_file, ".zip"))
-  zip::zip(zipfile = zip_path,
-           files = c(data_file_path, meta_path),
-           mode = "cherry-pick")
-  
-  # Clean up temporary metadata file
-  file.remove(meta_path)
+  if(!test) {
+    # Zip files
+    zip_path <- file.path(out_dir, paste0(data_name_file, ".zip"))
+    zip::zip(zipfile = zip_path,
+             files = c(data_file_path, meta_path),
+             mode = "cherry-pick",
+             ...)
+    
+    # Clean up temporary metadata file
+    file.remove(meta_path)
+  }
 }
+
 
 #' Export Data and Metadata to CSV and Markdown, then Zip
 #'
@@ -1332,3 +1411,204 @@ create_qgis_style_for_paletted_raster_from_csv <- function(styleData, outputQmlP
 #'   
 #'   cat("All specified packages installed and loaded.\n")
 #' }
+
+
+
+#' Install and Load R Packages with Optional Version Control
+#'
+#' Ensures that specified R packages are installed and loaded, optionally using
+#' \pkg{pak} for efficient installation or \pkg{groundhog} for reproducible
+#' versioned installations. The function handles missing packages, installs
+#' dependencies, sets repository sources, and provides informative messages
+#' about installation and loading status.
+#'
+#' @param pkgs Character vector of package names to install and load.
+#' @param date Optional character string in the format \code{"YYYY-MM-DD"} specifying
+#'   a CRAN snapshot date. If provided, the function uses the corresponding Posit Package
+#'   Manager repository (\url{https://packagemanager.posit.co/}) for reproducibility.
+#'   Required if \code{groundhog = TRUE}.
+#' @param groundhog Logical; if \code{TRUE}, uses the \pkg{groundhog} package to
+#'   load packages at the specific version available on the given date. Defaults to \code{FALSE}.
+#' @param pak_quiet Logical; if \code{TRUE} (default), suppresses verbose output
+#'   from \pkg{pak} during installation.
+#'
+#' @details
+#' This function performs the following steps:
+#' \enumerate{
+#'   \item Checks whether requested packages are already installed.
+#'   \item Optionally installs and uses \pkg{pak} for efficient package installation.
+#'   \item Optionally installs and uses \pkg{groundhog} for reproducible version loading.
+#'   \item Falls back to base R \code{install.packages()} if necessary.
+#'   \item Sets the CRAN repository URL, optionally tied to a date snapshot.
+#'   \item Loads all requested packages, reporting any that fail to load.
+#' }
+#'
+#' The function automatically installs \pkg{pak} if missing, attempting both
+#' CRAN installation and the official bootstrap script if needed. If packages
+#' are newly installed or updated, a restart of the R session may be required
+#' to ensure all dependencies load properly.
+#'
+#' @return
+#' A named character vector (invisible) of loaded package versions, with
+#' \code{NA} for any packages that failed to load.
+#'
+#' @note
+#' - Include \pkg{pak} and \pkg{groundhog} in your \code{Suggests} field if used.
+#' - The helper function internally suppresses warnings during installation to
+#'   maintain a clean console output.
+#' - It is recommended to restart R after major updates or new installations.
+#'
+#' @examples
+#' \dontrun{
+#' # Standard installation and loading
+#' install_load_packages(c("dplyr", "ggplot2"))
+#'
+#' # Using a CRAN snapshot for reproducibility
+#' install_load_packages(c("dplyr", "ggplot2"), date = "2023-01-01")
+#'
+#' # Using groundhog for strict version control
+#' install_load_packages(c("dplyr", "ggplot2"), groundhog = TRUE, date = "2023-01-01")
+#' }
+#'
+#' @importFrom utils install.packages packageVersion
+#' @importFrom utils installed.packages
+#' @importFrom base requireNamespace library
+#'
+#' @export
+install_load_packages <- function(pkgs, date = NULL, groundhog = FALSE, pak_quiet = TRUE) {
+  
+  # --- Helper: quiet install with base R ---
+  safe_install <- function(pkg, repos = "https://cloud.r-project.org") {
+    tryCatch(
+      suppressWarnings(install.packages(pkg, repos = repos, dependencies = TRUE)),
+      error = function(e) message("Could not install ", pkg, ": ", e$message)
+    )
+  }
+  
+  # --- Check which packages are missing ---
+  not_installed <- vapply(pkgs, function(p) !requireNamespace(p, quietly = TRUE), logical(1))
+  missing_pkgs <- pkgs[not_installed]
+  
+  if (length(missing_pkgs) == 0) {
+    message("All requested packages are already installed.")
+  }
+  
+  # --- Only ensure pak if actually needed ---
+  has_pak <- requireNamespace("pak", quietly = TRUE)
+  if (length(missing_pkgs) > 0 && !has_pak) {
+    message("Some packages are missing; installing 'pak'...")
+    
+    pak_install_success <- FALSE
+    try({
+      suppressWarnings(
+        install.packages("pak", repos = "https://cloud.r-project.org", dependencies = TRUE)
+      )
+      pak_install_success <- requireNamespace("pak", quietly = TRUE)
+    }, silent = TRUE)
+    
+    if (!pak_install_success) {
+      message("Standard install failed; trying pak bootstrap installer...")
+      try({
+        source("https://pak.r-lib.org/install.R")
+        pak_install_success <- requireNamespace("pak", quietly = TRUE)
+      }, silent = TRUE)
+    }
+    
+    if (!pak_install_success) {
+      warning("Failed to install 'pak' by any method; will fall back to base installers only.")
+    }
+    
+    has_pak <- requireNamespace("pak", quietly = TRUE)
+  }
+  
+  # --- Optionally ensure groundhog ---
+  if (groundhog) {
+    if (!requireNamespace("groundhog", quietly = TRUE)) {
+      message("Installing 'groundhog'...")
+      safe_install("groundhog")
+    }
+    if (is.null(date)) {
+      stop("groundhog = TRUE requires a non-null 'date' argument (YYYY-MM-DD).")
+    }
+  }
+  
+  # --- Repository selection ---
+  repo <- if (!is.null(date)) {
+    sprintf("https://packagemanager.posit.co/cran/%s", date)
+  } else {
+    "https://cloud.r-project.org"
+  }
+  message("Using CRAN repository: ", repo)
+  options(repos = c(CRAN = repo))
+  
+  # --- Install missing packages ---
+  installed_or_updated <- FALSE
+  
+  if (length(missing_pkgs) > 0) {
+    message("Missing packages detected: ", paste(missing_pkgs, collapse = ", "))
+    
+    if (has_pak) {
+      tryCatch({
+        if (pak_quiet) {
+          message("Attempting install with pak (quietly)...")
+          suppressMessages(suppressWarnings(
+            pak::pkg_install(missing_pkgs, ask = FALSE, upgrade = FALSE)
+          ))
+        } else {
+          message("Attempting install with pak...")
+          pak::pkg_install(missing_pkgs, ask = FALSE, upgrade = FALSE)
+        }
+        installed_or_updated <<- TRUE
+      }, error = function(e) {
+        message("pak installation failed: ", e$message)
+        message("Falling back to install.packages()...")
+        for (p in missing_pkgs) safe_install(p, repos = repo)
+        installed_or_updated <<- TRUE
+      })
+    } else {
+      message("pak unavailable; installing missing packages with install.packages()...")
+      for (p in missing_pkgs) safe_install(p, repos = repo)
+      installed_or_updated <- TRUE
+    }
+  }
+  
+  # --- Load packages ---
+  failed_to_load <- character()
+  
+  if (groundhog) {
+    message("Loading packages with groundhog (date = ", date, ")...")
+    tryCatch({
+      groundhog::groundhog.library(pkgs, date = date)
+    }, error = function(e) {
+      message("groundhog loading error: ", e$message)
+      failed_to_load <<- pkgs
+    })
+  } else {
+    message("Loading packages...")
+    for (p in pkgs) {
+      ok <- tryCatch({
+        library(p, character.only = TRUE, quietly = TRUE)
+        TRUE
+      }, error = function(e) {
+        message("Failed to load ", p, ": ", e$message)
+        FALSE
+      })
+      if (!ok) failed_to_load <- c(failed_to_load, p)
+    }
+  }
+  
+  # --- Restart message if needed ---
+  if (installed_or_updated || length(failed_to_load) > 0) {
+    message("\nSome packages were newly installed, updated, or failed to load.\n",
+            "This may be due to updated dependencies already loaded in memory.\n",
+            "Please restart R and re-run this function to ensure all packages load correctly.\n")
+  }
+  
+  # --- Report loaded versions ---
+  loaded_versions <- sapply(pkgs, function(p) {
+    if (requireNamespace(p, quietly = TRUE)) as.character(packageVersion(p)) else NA_character_
+  })
+  message("Packages loaded:\n",
+          paste(names(loaded_versions), loaded_versions, collapse = "\n"))
+  invisible(loaded_versions)
+}
